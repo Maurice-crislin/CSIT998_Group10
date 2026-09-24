@@ -1,0 +1,2 @@
+# No third-party dependencies -- standard library only.
+# An optional local Ollama server (https://ollama.com) powers Stage 2.

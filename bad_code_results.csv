@@ -1,0 +1,347 @@
+﻿file,status,finding_no,pattern,line,severity,explanation,suggested_code,caveats,elapsed_s,exit_code,raw_output
+bad_code_1.py,findings,1,N_PLUS_ONE,15,high,"Runs one query on olist_customers_dataset per element of `customer_ids` (line 15). A single `WHERE customer_id IN (...)` query fetches them all at once; the rows are then matched back to `customer_ids` in Python, so output order, duplicates and missing ids behave as before.","placeholders = "", "".join(""?"" * len(customer_ids))
+cursor.execute(
+    f""SELECT customer_id, * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})"",
+    list(customer_ids),
+)
+rows_by_customer_id = {r[0]: r[1:] for r in cursor.fetchall()}
+for customer_id in customer_ids:
+    row = rows_by_customer_id.get(customer_id)
+    if row:
+        customers.append({""customer_id"": row[0], ""customer_city"": row[3]})","Assumes customer_id is unique in olist_customers_dataset: fetchone() took the first match, the dict keeps the last.
+Values in `customer_ids` must have the same type as the customer_id column for the dict lookup to match.
+SQLite limits bound parameters (999 on old builds); chunk `customer_ids` if it can be larger.
+Values are now bound parameters instead of f-string interpolation, which also removes the SQL-injection risk.",72.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 15, severity: high) ---
+Runs one query on olist_customers_dataset per element of `customer_ids` (line 15). A single `WHERE customer_id IN (...)` query fetches them all at once; the rows are then matched back to `customer_ids` in Python, so output order, duplicates and missing ids behave as before.
+
+Suggested code:
+placeholders = "", "".join(""?"" * len(customer_ids))
+cursor.execute(
+    f""SELECT customer_id, * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})"",
+    list(customer_ids),
+)
+rows_by_customer_id = {r[0]: r[1:] for r in cursor.fetchall()}
+for customer_id in customer_ids:
+    row = rows_by_customer_id.get(customer_id)
+    if row:
+        customers.append({""customer_id"": row[0], ""customer_city"": row[3]})
+
+Caveats:
+- Assumes customer_id is unique in olist_customers_dataset: fetchone() took the first match, the dict keeps the last.
+- Values in `customer_ids` must have the same type as the customer_id column for the dict lookup to match.
+- SQLite limits bound parameters (999 on old builds); chunk `customer_ids` if it can be larger.
+- Values are now bound parameters instead of f-string interpolation, which also removes the SQL-injection risk.
+
+"
+bad_code_2.py,findings,1,N_PLUS_ONE,19,high,"Walks olist_customers_dataset -> olist_orders_dataset with a query per row, appending one result per matching row pair (line 28). A single JOIN query returns the same rows in one round trip.","cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, o.order_id AS order_id, o.order_status AS status
+    FROM olist_customers_dataset c
+    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id
+"""""")
+results = [{""customer_unique_id"": r[0], ""order_id"": r[1], ""status"": r[2]} for r in cursor.fetchall()]","Inner JOIN on purpose: outer rows with no match produced no output in the loop either.
+Row order is unspecified in both versions; add ORDER BY if the order matters.",106.6,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 19, severity: high) ---
+Walks olist_customers_dataset -> olist_orders_dataset with a query per row, appending one result per matching row pair (line 28). A single JOIN query returns the same rows in one round trip.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, o.order_id AS order_id, o.order_status AS status
+    FROM olist_customers_dataset c
+    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id
+"""""")
+results = [{""customer_unique_id"": r[0], ""order_id"": r[1], ""status"": r[2]} for r in cursor.fetchall()]
+
+Caveats:
+- Inner JOIN on purpose: outer rows with no match produced no output in the loop either.
+- Row order is unspecified in both versions; add ORDER BY if the order matters.
+
+"
+bad_code_3.py,findings,1,COUNT_IN_PYTHON,18,high,"Fetches every row of olist_orders_dataset, filters and reshapes them in Python, only to take len(delivered_orders) (line 31). SELECT COUNT(*) with the same filters in WHERE returns that number directly, without transferring any rows.","cursor.execute(""""""
+    SELECT COUNT(*) FROM olist_orders_dataset
+    WHERE order_status = 'delivered'
+"""""")
+delivered_orders_count = cursor.fetchone()[0]
+# then use delivered_orders_count in place of len(delivered_orders) (line 31)","Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.",205.0,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: COUNT_IN_PYTHON (line 18, severity: high) ---
+Fetches every row of olist_orders_dataset, filters and reshapes them in Python, only to take len(delivered_orders) (line 31). SELECT COUNT(*) with the same filters in WHERE returns that number directly, without transferring any rows.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT COUNT(*) FROM olist_orders_dataset
+    WHERE order_status = 'delivered'
+"""""")
+delivered_orders_count = cursor.fetchone()[0]
+# then use delivered_orders_count in place of len(delivered_orders) (line 31)
+
+Caveats:
+- Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.
+
+"
+bad_code_4.py,findings,1,N_PLUS_ONE,18,high,"Walks olist_orders_dataset -> olist_order_items_dataset with a query per row and sums the innermost rows in Python (line 29), once per olist_orders_dataset row. A single query with JOINs and GROUP BY returns the same rows.","cursor.execute(""""""
+    SELECT o.order_id AS order_id, COALESCE(SUM(oi.price), 0) AS total
+    FROM olist_orders_dataset o
+    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    WHERE o.order_status = 'delivered'
+    GROUP BY o.order_id
+"""""")
+order_totals = [{""order_id"": r[0], ""total"": r[1]} for r in cursor.fetchall()]","Assumes o.order_id identifies one row of olist_orders_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.
+Row order is unspecified in both versions; add ORDER BY if the order matters.",213.8,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 18, severity: high) ---
+Walks olist_orders_dataset -> olist_order_items_dataset with a query per row and sums the innermost rows in Python (line 29), once per olist_orders_dataset row. A single query with JOINs and GROUP BY returns the same rows.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT o.order_id AS order_id, COALESCE(SUM(oi.price), 0) AS total
+    FROM olist_orders_dataset o
+    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    WHERE o.order_status = 'delivered'
+    GROUP BY o.order_id
+"""""")
+order_totals = [{""order_id"": r[0], ""total"": r[1]} for r in cursor.fetchall()]
+
+Caveats:
+- Assumes o.order_id identifies one row of olist_orders_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+- LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.
+- Row order is unspecified in both versions; add ORDER BY if the order matters.
+
+"
+bad_code_5.py,findings,1,N_PLUS_ONE,27,high,"Walks olist_customers_dataset -> olist_orders_dataset -> olist_order_items_dataset with a query per row and sums the innermost rows in Python (line 41), once per olist_customers_dataset row. A single query with JOINs and GROUP BY returns the same rows.","cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, COALESCE(SUM(oi.price), 0) AS total_spending
+    FROM olist_customers_dataset c
+    LEFT JOIN olist_orders_dataset o ON o.customer_id = c.customer_id
+    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    GROUP BY c.customer_id, c.customer_unique_id
+"""""")
+customer_spending = [{""customer_unique_id"": r[0], ""total_spending"": r[1]} for r in cursor.fetchall()]","Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.
+Row order is unspecified in both versions; add ORDER BY if the order matters.",175.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 27, severity: high) ---
+Walks olist_customers_dataset -> olist_orders_dataset -> olist_order_items_dataset with a query per row and sums the innermost rows in Python (line 41), once per olist_customers_dataset row. A single query with JOINs and GROUP BY returns the same rows.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, COALESCE(SUM(oi.price), 0) AS total_spending
+    FROM olist_customers_dataset c
+    LEFT JOIN olist_orders_dataset o ON o.customer_id = c.customer_id
+    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    GROUP BY c.customer_id, c.customer_unique_id
+"""""")
+customer_spending = [{""customer_unique_id"": r[0], ""total_spending"": r[1]} for r in cursor.fetchall()]
+
+Caveats:
+- Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+- LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.
+- Row order is unspecified in both versions; add ORDER BY if the order matters.
+
+"
+bad_code_6.py,findings,1,N_PLUS_ONE,17,high,Runs one COUNT(*) query per row of olist_customers_dataset (line 17) and filters the result in Python (`order_count > 2`). GROUP BY c.customer_unique_id with HAVING COUNT(*) > 2 computes every count and applies the filter in one query.,"cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, COUNT(*) AS order_count
+    FROM olist_customers_dataset c
+    JOIN olist_orders_dataset o ON c.customer_id = o.customer_id
+    GROUP BY c.customer_unique_id
+    HAVING COUNT(*) > 2
+"""""")
+results = [{""customer_unique_id"": r[0], ""order_count"": r[1]} for r in cursor.fetchall()]","Returns each customer_unique_id once. The loop ran once per row of olist_customers_dataset's result, so a customer_unique_id that appears on several rows was appended once per row (duplicates); if those duplicates were intended, join this result back to the outer query.
+Row order is unspecified in both versions; add ORDER BY if the order matters.",210.8,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 17, severity: high) ---
+Runs one COUNT(*) query per row of olist_customers_dataset (line 17) and filters the result in Python (`order_count > 2`). GROUP BY c.customer_unique_id with HAVING COUNT(*) > 2 computes every count and applies the filter in one query.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, COUNT(*) AS order_count
+    FROM olist_customers_dataset c
+    JOIN olist_orders_dataset o ON c.customer_id = o.customer_id
+    GROUP BY c.customer_unique_id
+    HAVING COUNT(*) > 2
+"""""")
+results = [{""customer_unique_id"": r[0], ""order_count"": r[1]} for r in cursor.fetchall()]
+
+Caveats:
+- Returns each customer_unique_id once. The loop ran once per row of olist_customers_dataset's result, so a customer_unique_id that appears on several rows was appended once per row (duplicates); if those duplicates were intended, join this result back to the outer query.
+- Row order is unspecified in both versions; add ORDER BY if the order matters.
+
+"
+bad_code_7.py,findings,1,N_PLUS_ONE,19,high,"Walks olist_products_dataset -> olist_order_items_dataset with a query per row and counts and sums the innermost rows in Python (line 34, 35), once per olist_products_dataset row, then keeps only rows where `total_sales > 5000`. A single query with JOINs and GROUP BY ... HAVING returns the same rows.","cursor.execute(""""""
+    SELECT p.product_id AS product_id, p.product_category_name AS category, SUM(oi.price) AS total_sales, COUNT(oi.product_id) AS items_sold
+    FROM olist_products_dataset p
+    JOIN olist_order_items_dataset oi ON oi.product_id = p.product_id AND oi.price IS NOT NULL
+    WHERE p.product_category_name IS NOT NULL
+    GROUP BY p.product_id, p.product_category_name
+    HAVING SUM(oi.price) > 5000
+"""""")
+results = [{""product_id"": r[0], ""category"": r[1], ""total_sales"": r[2], ""items_sold"": r[3]} for r in cursor.fetchall()]","Assumes p.product_id, p.product_category_name identifies one row of olist_products_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.
+Row order is unspecified in both versions; add ORDER BY if the order matters.",83.5,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 19, severity: high) ---
+Walks olist_products_dataset -> olist_order_items_dataset with a query per row and counts and sums the innermost rows in Python (line 34, 35), once per olist_products_dataset row, then keeps only rows where `total_sales > 5000`. A single query with JOINs and GROUP BY ... HAVING returns the same rows.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT p.product_id AS product_id, p.product_category_name AS category, SUM(oi.price) AS total_sales, COUNT(oi.product_id) AS items_sold
+    FROM olist_products_dataset p
+    JOIN olist_order_items_dataset oi ON oi.product_id = p.product_id AND oi.price IS NOT NULL
+    WHERE p.product_category_name IS NOT NULL
+    GROUP BY p.product_id, p.product_category_name
+    HAVING SUM(oi.price) > 5000
+"""""")
+results = [{""product_id"": r[0], ""category"": r[1], ""total_sales"": r[2], ""items_sold"": r[3]} for r in cursor.fetchall()]
+
+Caveats:
+- Assumes p.product_id, p.product_category_name identifies one row of olist_products_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+- Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.
+- Row order is unspecified in both versions; add ORDER BY if the order matters.
+
+"
+bad_code_8.py,findings,1,COUNT_IN_PYTHON,18,high,"Fetches every row of olist_orders_dataset, filters and reshapes them in Python, only to take len(late_orders) (line 62). SELECT COUNT(*) with the same filters in WHERE returns that number directly, without transferring any rows.","cursor.execute(""""""
+    SELECT COUNT(*) FROM olist_orders_dataset
+    WHERE order_purchase_timestamp IS NOT NULL
+      AND ((order_estimated_delivery_date IS NOT NULL AND order_delivered_customer_date IS NOT NULL) AND (order_delivered_customer_date > order_estimated_delivery_date))
+"""""")
+late_orders_count = cursor.fetchone()[0]
+# then use late_orders_count in place of len(late_orders) (line 62)","Compares timestamps as text instead of parsed datetimes: identical as long as every stored value is zero-padded ISO text (e.g. 2017-10-02 10:56:33), which datetime.strptime would otherwise also accept unpadded.
+Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.",169.4,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: COUNT_IN_PYTHON (line 18, severity: high) ---
+Fetches every row of olist_orders_dataset, filters and reshapes them in Python, only to take len(late_orders) (line 62). SELECT COUNT(*) with the same filters in WHERE returns that number directly, without transferring any rows.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT COUNT(*) FROM olist_orders_dataset
+    WHERE order_purchase_timestamp IS NOT NULL
+      AND ((order_estimated_delivery_date IS NOT NULL AND order_delivered_customer_date IS NOT NULL) AND (order_delivered_customer_date > order_estimated_delivery_date))
+"""""")
+late_orders_count = cursor.fetchone()[0]
+# then use late_orders_count in place of len(late_orders) (line 62)
+
+Caveats:
+- Compares timestamps as text instead of parsed datetimes: identical as long as every stored value is zero-padded ISO text (e.g. 2017-10-02 10:56:33), which datetime.strptime would otherwise also accept unpadded.
+- Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.
+
+"
+bad_code_9.py,findings,1,MANUAL_JOIN,41,high,"Walks olist_customers_dataset -> olist_orders_dataset -> olist_order_items_dataset -> olist_products_dataset with nested Python loops and sums the innermost rows in Python (line 65), once per olist_customers_dataset row, then keeps only rows where `total_spending > 100`. A single query with JOINs and GROUP BY ... HAVING returns the same rows.","cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, SUM(oi.price) AS total_spending
+    FROM olist_customers_dataset c
+    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id
+    JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    JOIN olist_products_dataset p ON p.product_id = oi.product_id AND p.product_category_name = 'beleza_saude' AND oi.price IS NOT NULL
+    GROUP BY c.customer_id, c.customer_unique_id
+    HAVING SUM(oi.price) > 100
+"""""")
+results = [{""customer_unique_id"": r[0], ""total_spending"": r[1]} for r in cursor.fetchall()]","Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.
+Row order is unspecified in both versions; add ORDER BY if the order matters.",213.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: MANUAL_JOIN (line 41, severity: high) ---
+Walks olist_customers_dataset -> olist_orders_dataset -> olist_order_items_dataset -> olist_products_dataset with nested Python loops and sums the innermost rows in Python (line 65), once per olist_customers_dataset row, then keeps only rows where `total_spending > 100`. A single query with JOINs and GROUP BY ... HAVING returns the same rows.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT c.customer_unique_id AS customer_unique_id, SUM(oi.price) AS total_spending
+    FROM olist_customers_dataset c
+    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id
+    JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    JOIN olist_products_dataset p ON p.product_id = oi.product_id AND p.product_category_name = 'beleza_saude' AND oi.price IS NOT NULL
+    GROUP BY c.customer_id, c.customer_unique_id
+    HAVING SUM(oi.price) > 100
+"""""")
+results = [{""customer_unique_id"": r[0], ""total_spending"": r[1]} for r in cursor.fetchall()]
+
+Caveats:
+- Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
+- Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.
+- Row order is unspecified in both versions; add ORDER BY if the order matters.
+
+"
+bad_code_10.py,no_issues,,,,,,,,122.4,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+No issues detected.
+"
+bad_code_11.py,findings,1,MANUAL_JOIN,34,high,"Instead of one SQL query with three JOINs, the code manually re-implements a 3-level join in Python using nested dict lookups.","SELECT p.product_id, p.product_category_name, oi.order_id, oi.price, o.order_status
+FROM olist_products_dataset p
+JOIN olist_order_items_dataset oi ON p.product_id = oi.product_id
+JOIN olist_orders_dataset o ON oi.order_id = o.order_id
+WHERE o.order_status = 'delivered'
+GROUP BY p.product_id, oi.order_id, o.order_status
+ORDER BY p.product_category_name, oi.price, o.order_status;",The optimized code assumes that the order_status is 'delivered' for the manual join to work correctly.,171.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: MANUAL_JOIN (line 34, severity: high) ---
+Instead of one SQL query with three JOINs, the code manually re-implements a 3-level join in Python using nested dict lookups.
+
+Suggested code:
+SELECT p.product_id, p.product_category_name, oi.order_id, oi.price, o.order_status
+FROM olist_products_dataset p
+JOIN olist_order_items_dataset oi ON p.product_id = oi.product_id
+JOIN olist_orders_dataset o ON oi.order_id = o.order_id
+WHERE o.order_status = 'delivered'
+GROUP BY p.product_id, oi.order_id, o.order_status
+ORDER BY p.product_category_name, oi.price, o.order_status;
+
+Caveats:
+- The optimized code assumes that the order_status is 'delivered' for the manual join to work correctly.
+
+"
+bad_code_12.py,findings,1,N_PLUS_ONE,10,high,Runs one query on orders per row of customers (line 10) only to check whether it returns anything (`not orders`). That is an anti-join: WHERE NOT EXISTS with a correlated subquery answers it for every row in one query.,"cursor.execute(""""""
+    SELECT c.*
+    FROM customers c
+    WHERE NOT EXISTS (
+        SELECT 1 FROM orders o
+        WHERE o.customer_id = c.customer_id
+    )
+"""""")
+results = cursor.fetchall()","NOT EXISTS rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL.
+An index on orders(customer_id) lets each EXISTS probe be a lookup instead of a scan.
+Row order is unspecified in both versions; add ORDER BY if the order matters.
+The key is compared column-to-column instead of being pasted into the SQL text, which also removes the SQL-injection risk of the f-string.",92.3,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 10, severity: high) ---
+Runs one query on orders per row of customers (line 10) only to check whether it returns anything (`not orders`). That is an anti-join: WHERE NOT EXISTS with a correlated subquery answers it for every row in one query.
+
+Suggested code:
+cursor.execute(""""""
+    SELECT c.*
+    FROM customers c
+    WHERE NOT EXISTS (
+        SELECT 1 FROM orders o
+        WHERE o.customer_id = c.customer_id
+    )
+"""""")
+results = cursor.fetchall()
+
+Caveats:
+- NOT EXISTS rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL.
+- An index on orders(customer_id) lets each EXISTS probe be a lookup instead of a scan.
+- Row order is unspecified in both versions; add ORDER BY if the order matters.
+- The key is compared column-to-column instead of being pasted into the SQL text, which also removes the SQL-injection risk of the f-string.
+
+"

@@ -1,0 +1,9 @@
+# Python's compiled cache files (recreated automatically)
+__pycache__/
+*.pyc
+
+# The Olist test database is 109 MB, over GitHub's 100 MB file limit.
+# It is used only to run the example programs in tests/bad_code/.
+tests/bad_code/olist.db
+olist.db
+tests/bad_code/olist.zip
