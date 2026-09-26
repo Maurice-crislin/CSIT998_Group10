@@ -66,7 +66,7 @@ GROUP BY o.order_id
 
 Other files:
 13. run_bad_code_tests.py          runs cli.py on many files, writes a CSV
-14. README.md, requirements.txt, algorithm_diagram.dot/.png
+14. README.md, requirements.txt, algorithm_diagram.png
 ```
 
 The picture `algorithm_diagram.png` shows the same flow as a diagram.
@@ -348,8 +348,11 @@ objects share one list — a classic Python mistake.)
   → table "orders",  columns ["order_id"],  where ["status = 'delivered'"]
 ```
 
-It only understands `SELECT ... FROM one_table [WHERE ...] [LIMIT n]`. For
-anything more complex it returns no table, but the SQL text is kept.
+It only understands `SELECT ... FROM one_table [alias] [WHERE ...] [LIMIT n]`.
+If the table has an alias (`FROM olist_orders_dataset o`), the `o.` in front of
+column names is removed, because with only one table `o.order_id` simply means
+`order_id`. For anything more complex it returns no table, but the SQL text is
+kept.
 
 **`has_limit(sql)`** — `True` if the SQL has a `LIMIT`.
 
@@ -433,9 +436,49 @@ outermost loop. The first one that matches wins:
 | `_chain_aggregate` | nested loops with a running total | `JOIN` + `SUM`/`COUNT` + `GROUP BY` (+ `HAVING`) |
 | `_chain_rows` | nested loops appending each matching pair | one `JOIN` query |
 | `_scalar_having` | `SELECT COUNT(*)` per row, then `if n > N:` | `GROUP BY ... HAVING COUNT(*) > N` |
-| `_semi_join` | a query per row, then only `if not rows:` / `if rows:` | `WHERE NOT EXISTS (...)` / `WHERE EXISTS (...)` |
+| `_semi_join` | a query per row, then only `if not rows:` / `if rows:` | anti-join (both forms below) / `WHERE EXISTS (...)` |
+| `_membership_join` | `if row not in other_rows:` / `if row in other_rows:`, where `other_rows` came from another query | anti-join (both forms below) / `WHERE EXISTS (...)` |
 | `_list_lookup` | a loop over a Python list of ids, one query per id | `WHERE id IN (...)` |
 | `_count_only` | a list that is only used with `len()` | `SELECT COUNT(*) ... WHERE ...` |
+
+After that, **`_not_in_null`** looks inside the SQL text of every query
+(not at loops) for `col NOT IN (SELECT col FROM other_table ...)`. This is an
+*anti-join* ("rows with no match"), but `NOT IN` has a trap: if the subquery
+returns even one NULL, `x NOT IN (..., NULL)` is never true, so the query
+returns no rows at all.
+
+**Anti-joins are always suggested in two forms**, built by the helper
+`_anti_join_forms()` (used by both `_not_in_null` and `_semi_join`):
+
+```sql
+-- Option 1: NOT EXISTS -- for each order, check that no review exists
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM olist_order_reviews_dataset r
+    WHERE r.order_id = o.order_id
+)
+
+-- Option 2: LEFT JOIN + IS NULL -- join the reviews, keep the orders that found none
+LEFT JOIN olist_order_reviews_dataset r ON r.order_id = o.order_id
+WHERE r.order_id IS NULL
+```
+
+- **`NOT EXISTS`** checks each row for a match directly, so a NULL in the
+  other table can't hide the answer.
+- **`LEFT JOIN`** keeps every order, even one with no review; for those, the
+  review's columns come back as NULL. `WHERE r.order_id IS NULL` keeps exactly
+  those. It checks the column used for matching, which can only be NULL when
+  no partner was found.
+
+To build the JOIN version safely, `_not_in_null` first splits the query into
+its parts (the `SELECT` list, the table, the `WHERE` tests) and puts the table
+alias in front of every column (`order_id` → `o.order_id`). After a JOIN, a bare
+name like `order_id` could belong to either table. Queries it can't split
+safely (with `OR`, other JOINs, `GROUP BY`, ...) are left to the AI.
+
+The suggested code also includes a `CREATE INDEX` line (as a comment) for the
+looked-up column. Without it, SQLite runs `NOT EXISTS` very slowly, because it
+builds a temporary index for a JOIN by itself but not for `NOT EXISTS`.
 
 If the code differs even slightly from a pattern, the function returns
 `None` and the problem is left to the AI. It never guesses.
@@ -584,9 +627,7 @@ Options include `--out` (another CSV name), `--model`, `--timeout`,
 |---|---|
 | `README.md` | the project overview: what the tool does, how to install and run it |
 | `requirements.txt` | normally lists packages to install with `pip`; here it only says that none are needed |
-| `algorithm_diagram.png` | a picture of the whole flow described in this document |
-| `algorithm_diagram.dot` | the source of that picture, written for Graphviz. Change it, then run `dot -Tpng -Gdpi=150 algorithm_diagram.dot -o algorithm_diagram.png` |
----
+| `algorithm_diagram.png` | a picture of the whole flow described in this document |---
 
 ## Glossary
 

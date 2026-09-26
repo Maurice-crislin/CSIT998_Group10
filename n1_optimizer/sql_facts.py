@@ -26,6 +26,7 @@ from .ast_model import Condition
 
 _SELECT_RE = re.compile(
     r"""^\s*SELECT\s+(?P<columns>.*?)\s+FROM\s+(?P<table>[A-Za-z_]\w*)
+        (?:\s+(?:AS\s+)?(?!(?:WHERE|LIMIT)\b)(?P<alias>[A-Za-z_]\w*))?
         (?:\s+WHERE\s+(?P<where>.*?))?
         (?:\s+LIMIT\s+\d+)?\s*;?\s*$""",
     re.IGNORECASE | re.VERBOSE | re.DOTALL,
@@ -55,8 +56,26 @@ def parse_select(sql: str) -> Tuple[Optional[str], List[str], List[Condition]]:
     m = _SELECT_RE.match(sql.strip())
     if not m:
         return None, [], []
-    columns = [c.strip() for c in m.group("columns").split(",")]
-    return m.group("table"), columns, _parse_where(m.group("where"))
+    columns_text, where_text = m.group("columns"), m.group("where")
+    if m.group("alias"):
+        # With only one table, `o.order_id` just means `order_id`: drop the prefix.
+        columns_text = _strip_prefix(columns_text, m.group("alias"))
+        where_text = _strip_prefix(where_text, m.group("alias")) if where_text else where_text
+    columns = [c.strip() for c in columns_text.split(",")]
+    return m.group("table"), columns, _parse_where(where_text)
+
+
+_SQL_TEXT_RE = re.compile(r"('(?:[^']|'')*')")  # a text value in quotes, like 'abc'
+
+
+def _strip_prefix(sql: str, alias: str) -> str:
+    """Remove `alias.` in front of column names, e.g. `o.status` -> `status`.
+    Text inside quotes is left unchanged."""
+    pieces = _SQL_TEXT_RE.split(sql)  # odd positions are the quoted parts
+    return "".join(
+        piece if i % 2 else re.sub(rf"\b{re.escape(alias)}\.(?=[A-Za-z_*])", "", piece)
+        for i, piece in enumerate(pieces)
+    )
 
 
 def _parse_where(where_text: Optional[str]) -> List[Condition]:

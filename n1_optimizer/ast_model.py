@@ -128,6 +128,25 @@ class ExistsCheck:
 
 
 @dataclass
+class MembershipCheck:
+    """A loop that keeps rows depending on whether they appear in another
+    list of rows, using Python's `in` / `not in`.
+
+    Example:
+        for order in orders:
+            if order not in orders_with_reviews:   # negated=True
+                results.append(order)
+    `x in some_list` compares x with every item of the list, so doing it
+    for every row is very slow. In SQL this is a semi-join (`in`) or an
+    anti-join (`not in`).
+    """
+    item: str                                      # what is looked for, e.g. "order" (the whole row)
+    collection: str                                # the list it is looked for in, e.g. "orders_with_reviews"
+    negated: bool                                  # True for `not in` (keep rows *without* a match)
+    raw: str                                       # the Python test, as written
+
+
+@dataclass
 class LoopNode:
     """One `for` loop, with everything that happens inside it."""
     lineno: int                                    # line number of the `for`
@@ -148,6 +167,7 @@ class LoopNode:
     # `if x > 2:` (or similar). Stored as SQL, e.g. `COUNT(*) > 2`.
     result_guard: Optional[Condition] = None
     exists_check: Optional[ExistsCheck] = None     # see ExistsCheck above
+    membership: Optional[MembershipCheck] = None   # see MembershipCheck above
     queries: List[QueryCall] = field(default_factory=list)          # queries run inside this loop
     appends: List[AppendOp] = field(default_factory=list)           # things added to collections
     aggregations: List[AggregationOp] = field(default_factory=list)  # running totals / counters / flags

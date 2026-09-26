@@ -31,14 +31,23 @@ The patterns:
     (`if not rows:` / `if rows:`). Becomes WHERE NOT EXISTS (...) / WHERE
     EXISTS (...). Keeping rows with *no* match is called an "anti-join";
     keeping rows *with* a match is called a "semi-join".
+  - _membership_join: a loop that keeps rows depending on `row in other_rows`
+    / `row not in other_rows` (another query's rows). Becomes EXISTS (for
+    `in`) or an anti-join (for `not in`), instead of searching the other
+    list once per row.
   - _count_only: a list that is only used with len(). Becomes
     SELECT COUNT(*) with all the loop's filters in the WHERE clause.
   - _list_lookup: a loop over a Python list of ids that runs one query per
     id. Becomes one query with `WHERE id IN (...)`.
+  - _not_in_null: not a loop, but a query that uses `NOT IN (SELECT ...)`
+    to find rows with no match. NOT IN returns nothing at all if the
+    subquery contains a NULL, so it becomes the NULL-safe
+    WHERE NOT EXISTS (...) anti-join.
 """
 from __future__ import annotations
 
 import re
+import textwrap
 from typing import Dict, List, Optional, Set, Tuple
 
 from .ast_model import AppendOp, Condition, LoopNode, ProcedureAST, QueryCall, RewriteHint
@@ -54,6 +63,11 @@ _SIMPLE_COND_RE = re.compile(r"^\s*(?P<col>[A-Za-z_]\w*)(?P<rest>\s*(?:=|!=|<>|>
 _JOIN_COND_RE = re.compile(r"^\s*(?P<lv>\w+)\.(?P<lc>\w+)\s*=\s*(?P<rv>\w+)\.(?P<rc>\w+)\s*$")
 # words left out when making short table aliases (see _new_alias)
 _ALIAS_SKIP = {"olist", "dataset", "table", "tbl"}
+# short SQL keywords a generated alias must never be
+_SQL_KEYWORDS = {
+    "AS", "BY", "IF", "IN", "IS", "NO", "OF", "ON", "OR", "TO", "DO",
+    "ADD", "ALL", "AND", "ASC", "END", "FOR", "KEY", "NOT", "SET", "ROW",
+}
 # a test of a variable against a number: "total > 100"
 _VAR_CMP_RE = re.compile(r"^\s*(?P<var>\w+)\s*(?P<op>>=|<=|!=|>|<|=)\s*(?P<const>-?\d+(?:\.\d+)?)\s*$")
 # SQL comparison sign -> a function doing the same comparison in Python
@@ -138,7 +152,8 @@ def _new_alias(table: str, used: Set[str]) -> str:
     words = [w for w in table.lower().split("_") if w and w not in _ALIAS_SKIP] or [table.lower()]
     base = "".join(w[0] for w in words)
     alias, n = base, 2
-    while alias in used:
+    # An alias must not be an SQL keyword ("order_reviews" would give "or").
+    while alias in used or alias.upper() in _SQL_KEYWORDS:
         alias, n = f"{base}{n}", n + 1
     used.add(alias)
     return alias
@@ -711,37 +726,389 @@ def _semi_join(outer: QueryCall, loop: LoopNode) -> Optional[RewriteHint]:
     where = _outer_where(outer, oa)
     if where is None:
         return None
-    exists = (
-        f"{'NOT ' if check.negated else ''}EXISTS (\n    SELECT 1 FROM {q.table} {ia}\n    WHERE "
-        + "\n      AND ".join(correlate) + "\n)"
-    )
-    sql_lines = [f"SELECT {select}", f"FROM {outer.table} {oa}", "WHERE " + " AND ".join(where + [exists])]
-    indented = "\n".join("    " + l for l in "\n".join(sql_lines).split("\n"))
-    code = f'{outer.cursor}.execute("""\n{indented}\n""")\n{build}'
+    key_column = correlate[0].split("=")[0].strip().split(".")[-1]
+    if check.negated:
+        # "Keep rows with no match": offer both anti-join forms.
+        ne_sql, lj_sql = _anti_join_forms(select, outer.table, oa, q.table, ia, correlate[0], correlate[1:], where + [None])
+        sql = ne_sql + "\n\n-- or --\n\n" + lj_sql
+        code = _anti_join_code(outer.cursor, ne_sql, lj_sql, build, (q.table, key_column))
+        how = "NOT EXISTS with a correlated subquery, or LEFT JOIN + IS NULL, answers it"
+    else:
+        # "Keep rows with a match": EXISTS (a JOIN would repeat rows with several matches).
+        exists = "EXISTS (\n    SELECT 1\n" f"    FROM {q.table} {ia}\n    WHERE " + "\n      AND ".join(correlate) + "\n)"
+        sql = "\n".join([f"SELECT {select}", f"FROM {outer.table} {oa}", _where_block(where + [exists])])
+        code = f'{outer.cursor}.execute("""\n{textwrap.indent(sql, "    ")}\n""")\n{build}'
+        how = "WHERE EXISTS with a correlated subquery answers it"
     kind = "anti-join" if check.negated else "semi-join"
     return RewriteHint(
         pattern="N_PLUS_ONE",
         lineno=q.lineno,
         explanation=(
             f"Runs one query on {q.table} per row of {outer.table} (line {q.lineno}) only to check "
-            f"whether it returns anything (`{check.raw}`). That is an {kind}: "
-            f"WHERE {'NOT ' if check.negated else ''}EXISTS with a correlated subquery answers it for "
-            "every row in one query."
+            f"whether it returns anything (`{check.raw}`). That is an {kind}: {how} for every row "
+            "in one query."
         ),
-        sql="\n".join(sql_lines),
+        sql=sql,
         optimized_code=code,
         caveats=[
-            "NOT EXISTS rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL."
+            "NOT EXISTS / LEFT JOIN + IS NULL rather than NOT IN: NOT IN returns no rows at all if "
+            "the subquery yields a NULL."
             if check.negated else
             "EXISTS rather than a JOIN: a JOIN would repeat the outer row once per match.",
-            f"An index on {q.table}({correlate[0].split('=')[0].strip().split('.')[-1]}) lets each "
-            "EXISTS probe be a lookup instead of a scan.",
+            f"An index on {q.table}({key_column}) lets each lookup be quick instead of a scan.",
             "Row order is unspecified in both versions; add ORDER BY if the order matters.",
             "The key is compared column-to-column instead of being pasted into the SQL text, which also "
             "removes the SQL-injection risk of the f-string.",
         ],
         lines=sorted({loop.lineno, q.lineno, append.lineno}),
     )
+
+
+def _where_block(parts: List[str]) -> str:
+    """`WHERE a\n  AND b ...`. Multi-line parts (a NOT EXISTS block) are
+    indented so they line up under their `AND`."""
+    lines = []
+    for i, part in enumerate(parts):
+        keyword = "WHERE " if i == 0 else "  AND "
+        pad = "" if i == 0 else "  "
+        first, *rest = part.split("\n")
+        lines.append(keyword + first)
+        lines.extend(pad + line for line in rest)
+    return "\n".join(lines)
+
+
+def _anti_join_forms(
+    select: str, table: str, alias: str, inner_table: str, inner_alias: str,
+    match: str, inner_filters: List[str], where_parts: List[Optional[str]],
+) -> Tuple[str, str]:
+    """Write the same anti-join ("rows with no match") in two ways.
+
+    `match` links the two tables, e.g. "r.order_id = o.order_id".
+    `inner_filters` are extra tests on the other table's rows.
+    `where_parts` are the outer query's other WHERE tests; the `None` in
+    the list marks where the anti-join test goes.
+
+    Returns (NOT EXISTS version, LEFT JOIN version):
+
+      1. NOT EXISTS -- for each row, check that no matching row exists:
+             WHERE NOT EXISTS (SELECT 1 FROM reviews r WHERE r.order_id = o.order_id)
+
+      2. LEFT JOIN + IS NULL -- join the other table, keeping every row
+         even without a partner (that's what LEFT JOIN does), then keep only
+         the rows where the partner's column came back empty (NULL):
+             LEFT JOIN reviews r ON r.order_id = o.order_id
+             WHERE r.order_id IS NULL
+         The column checked is the one used to match, so it can only be
+         NULL when no partner was found."""
+    inner_key = match.split("=")[0].strip()
+    not_exists = (
+        "NOT EXISTS (\n    SELECT 1\n"
+        f"    FROM {inner_table} {inner_alias}\n"
+        "    WHERE " + "\n      AND ".join([match] + inner_filters) + "\n)"
+    )
+    head = [f"SELECT {select}", f"FROM {table} {alias}"]
+    ne_sql = "\n".join(head + [_where_block([not_exists if p is None else p for p in where_parts])])
+    lj_sql = "\n".join(
+        head
+        + [f"LEFT JOIN {inner_table} {inner_alias} ON " + " AND ".join([match] + inner_filters)]
+        + [_where_block([f"{inner_key} IS NULL" if p is None else p for p in where_parts])]
+    )
+    return ne_sql, lj_sql
+
+
+def _anti_join_code(cursor: str, ne_sql: str, lj_sql: str, after: str, index: Tuple[str, str]) -> str:
+    """Python code offering both anti-join versions, plus the index they need."""
+    def execute(sql: str) -> str:
+        return f'{cursor}.execute("""\n{textwrap.indent(sql, "    ")}\n""")' + (f"\n{after}" if after else "")
+    table, column = index
+    return (
+        "# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.\n"
+        f"{execute(ne_sql)}\n\n"
+        "# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.\n"
+        f"{execute(lj_sql)}\n\n"
+        "# Both are fastest with an index on the column they look up. Option 1 especially needs it:\n"
+        "# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.\n"
+        "# Create it once if missing:\n"
+        f"# CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table}({column});"
+    )
+
+
+# `outer_col NOT IN (SELECT inner_col FROM inner_table [alias] [WHERE ...])`
+# The subquery must be simple: no brackets inside it (so no nested subqueries).
+_NOT_IN_RE = re.compile(
+    r"""(?P<outer>(?:(?P<oprefix>[A-Za-z_]\w*)\.)?(?P<ocol>[A-Za-z_]\w*))
+        \s+NOT\s+IN\s*\(\s*
+        SELECT\s+(?:DISTINCT\s+)?(?:(?P<iprefix>[A-Za-z_]\w*)\.)?(?P<icol>[A-Za-z_]\w*)
+        \s+FROM\s+(?P<itable>[A-Za-z_]\w*)
+        (?:\s+(?:AS\s+)?(?!WHERE\b)(?P<ialias>[A-Za-z_]\w*))?
+        (?:\s+WHERE\s+(?P<iwhere>[^()]*?))?
+        \s*\)""",
+    re.I | re.S | re.X,
+)
+# A whole simple query: SELECT <list> FROM <table> [alias] WHERE <conditions>
+_SIMPLE_SELECT_RE = re.compile(
+    r"""^\s*SELECT\s+(?P<select>.+?)\s+FROM\s+(?P<table>[A-Za-z_]\w*)
+        (?:\s+(?:AS\s+)?(?!WHERE\b)(?P<alias>[A-Za-z_]\w*))?
+        \s+WHERE\s+(?P<where>.+?)\s*;?\s*$""",
+    re.I | re.S | re.X,
+)
+_BARE_COL_RE = re.compile(r"^[A-Za-z_]\w*$")
+_PREFIXED_RE = re.compile(r"^(?P<prefix>[A-Za-z_]\w*)\.(?P<col>[A-Za-z_]\w*|\*)$")
+
+
+def _qualify_parts(text: str, alias: str, allowed_prefixes: Set[str]) -> Optional[List[str]]:
+    """Split `a = 1 AND b > 2` on AND and put `alias.` in front of each bare
+    column. Parts that already have a prefix must use one of `allowed_prefixes`.
+    None if any part is too complicated."""
+    parts = []
+    for part in re.split(r"\s+AND\s+", " ".join(text.split()), flags=re.I):
+        m = re.match(r"^(?P<prefix>[A-Za-z_]\w*)\.[A-Za-z_]\w*\s", part + " ")
+        if m:
+            if m.group("prefix") not in allowed_prefixes:
+                return None
+            parts.append(part)
+        else:
+            qualified = _qualify(part, alias)
+            if not qualified:
+                return None
+            parts.append(qualified)
+    return parts
+
+
+def _not_in_null(q: QueryCall) -> Optional[RewriteHint]:
+    """A query that uses `NOT IN (subquery)` to find rows with no match.
+
+    Example ("orders that have no review"):
+        SELECT o.order_id FROM orders o
+        WHERE o.order_id NOT IN (SELECT r.order_id FROM reviews r)
+
+    This is an anti-join, but NOT IN has a trap: if the subquery returns
+    even one NULL, `x NOT IN (..., NULL)` is never true, so the query
+    silently returns no rows at all. Two anti-join forms don't have that
+    problem, and both are suggested (see _anti_join_forms):
+        1. WHERE NOT EXISTS (SELECT 1 FROM reviews r WHERE r.order_id = o.order_id)
+        2. LEFT JOIN reviews r ON r.order_id = o.order_id  WHERE r.order_id IS NULL
+
+    Only simple queries are rewritten: one table, one NOT IN, and other
+    WHERE tests joined with AND. Anything else is left to the AI."""
+    if q.bound_params:
+        return None
+    query = _SIMPLE_SELECT_RE.match(q.raw_sql)
+    if not query:
+        return None
+    where = query.group("where")
+    if re.search(r"\b(OR|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|UNION)\b", where, re.I):
+        return None
+    matches = list(_NOT_IN_RE.finditer(where))
+    if len(matches) != 1:
+        return None
+    m = matches[0]
+    table, alias = query.group("table"), query.group("alias")
+    oa = alias or _new_alias(table, set())
+    names = {table, oa}
+
+    # The outer column: must belong to the outer table.
+    if m.group("oprefix") and m.group("oprefix") not in names:
+        return None
+    outer_ref = f"{oa}.{m.group('ocol')}"
+
+    # The inner table needs an alias that differs from the outer one.
+    ia = m.group("ialias")
+    if ia is None or ia in names:
+        if ia is not None or m.group("iprefix"):
+            return None  # renaming an alias used inside the subquery isn't worth the risk
+        ia = _new_alias(m.group("itable"), set(names))
+    if m.group("iprefix") and m.group("iprefix") not in (ia, m.group("itable")):
+        return None
+    inner_filters = []
+    if m.group("iwhere"):
+        inner_filters = _qualify_parts(m.group("iwhere"), ia, {ia, m.group("itable")})
+        if inner_filters is None:
+            return None
+    match = f"{ia}.{m.group('icol')} = {outer_ref}"
+
+    # The other WHERE tests, with a None marking where NOT IN was.
+    before, after = where[:m.start()].strip(), where[m.end():].strip()
+    before = re.sub(r"\s+AND$", "", before, flags=re.I).strip()
+    after = re.sub(r"^AND\s+", "", after, flags=re.I).strip()
+    before_parts = _qualify_parts(before, oa, names) if before else []
+    after_parts = _qualify_parts(after, oa, names) if after else []
+    if before_parts is None or after_parts is None:
+        return None
+    where_parts: List[Optional[str]] = before_parts + [None] + after_parts
+
+    # The SELECT list, with every column given the outer table's prefix
+    # (after the JOIN, a bare name like `order_id` could mean either table).
+    select_items = []
+    for item in [s.strip() for s in query.group("select").split(",")]:
+        as_match = re.match(r"^(?P<expr>\S+)\s+AS\s+(?P<name>\w+)$", item, re.I)
+        expr, name = (as_match.group("expr"), as_match.group("name")) if as_match else (item, None)
+        if expr == "*":
+            expr = f"{oa}.*"
+        elif _BARE_COL_RE.match(expr):
+            expr = f"{oa}.{expr}"
+        else:
+            p = _PREFIXED_RE.match(expr)
+            if not p or p.group("prefix") not in names:
+                return None
+            expr = f"{oa}.{p.group('col')}"
+        select_items.append(f"{expr} AS {name}" if name else expr)
+
+    ne_sql, lj_sql = _anti_join_forms(
+        ", ".join(select_items), table, oa, m.group("itable"), ia, match, inner_filters, where_parts
+    )
+    code = _anti_join_code(q.cursor, ne_sql, lj_sql, "", (m.group("itable"), m.group("icol")))
+    return RewriteHint(
+        pattern="NOT_IN_NULL",
+        lineno=q.lineno,
+        explanation=(
+            f"`{outer_ref} NOT IN (SELECT {ia}.{m.group('icol')} ...)` is an anti-join (rows with no "
+            "match) written with NOT IN. If the subquery ever returns a NULL, `x NOT IN (..., NULL)` "
+            "is never true and the query silently returns no rows. Two NULL-safe forms give the "
+            "intended answer: NOT EXISTS, or LEFT JOIN + IS NULL."
+        ),
+        sql=ne_sql + "\n\n-- or --\n\n" + lj_sql,
+        optimized_code=code,
+        caveats=[
+            "The result is the same as before whenever the subquery returns no NULLs. If it does "
+            "return NULLs, the old query returned no rows at all; the new ones return the rows "
+            "that really have no match.",
+            f"A row whose own {outer_ref} is NULL was left out by NOT IN but is kept by both new "
+            f"forms (nothing can match it). Add `AND {outer_ref} IS NOT NULL` to leave such rows out.",
+            "LEFT JOIN + IS NULL returns each unmatched row once; it checks the column used for "
+            "matching, which can only be NULL when no partner was found.",
+            "To keep NOT IN instead, filter the NULLs out inside the subquery: "
+            "`... NOT IN (SELECT col FROM t WHERE col IS NOT NULL)`.",
+        ],
+        lines=[q.lineno],
+    )
+
+
+def _membership_join(
+    outer: QueryCall, loop: LoopNode, queries_by_var: Dict[str, QueryCall], top_level: Set[int]
+) -> Optional[RewriteHint]:
+    """A loop that keeps rows depending on whether they appear in another
+    query's rows, using Python's `in` / `not in`.
+
+    Example ("orders without a review"):
+        cursor.execute("SELECT o.order_id FROM orders o")
+        orders = cursor.fetchall()
+        cursor.execute("SELECT r.order_id FROM reviews r")
+        reviewed = cursor.fetchall()
+        for order in orders:
+            if order not in reviewed:
+                results.append(order)
+
+    `order not in reviewed` compares `order` with every item of `reviewed`,
+    one by one. Doing that for every order means (orders x reviews)
+    comparisons -- billions for large tables. In SQL, `not in` becomes an
+    anti-join (both forms, see _anti_join_forms) and `in` becomes EXISTS.
+
+    Both queries must select exactly one column: then each row is just
+    that one value, and comparing rows means comparing those values."""
+    mc = loop.membership
+    if mc is None or mc.item != loop.loop_var:
+        return None
+    inner = queries_by_var.get(mc.collection)
+    if inner is None or id(inner) not in top_level or inner.fetch_kind != "fetchall":
+        return None
+    for q in (outer, inner):
+        if not q.table or len(q.columns) != 1 or q.columns == ["*"] or q.has_limit or q.bound_params:
+            return None
+    if loop.queries or loop.nested_loops or loop.aggregations or loop.conditions:
+        return None
+    if loop.opaque_filters != [mc.raw] and len(loop.opaque_filters) != 1:
+        return None
+    if len(loop.appends) != 1:
+        return None
+    append = loop.appends[0]
+    if append.kind != "append" or append.in_branch or (append.guard is not None and append.guard.raw != mc.raw):
+        return None
+
+    # Reuse the aliases the original queries used (e.g. `FROM reviews r`), if they don't clash.
+    oa = _own_alias(outer) or _new_alias(outer.table, set())
+    ia = _own_alias(inner)
+    if ia is None or ia == oa:
+        ia = _new_alias(inner.table, {oa})
+    outer_col = _column_at_name(outer.columns[0])
+    inner_col = _column_at_name(inner.columns[0])
+    if not outer_col or not inner_col:
+        return None
+    match = f"{ia}.{inner_col} = {oa}.{outer_col}"
+    inner_filters = []
+    for cond in inner.where:
+        qualified = _qualify(cond.sql or "", ia)
+        if not qualified:
+            return None
+        inner_filters.append(qualified)
+    where = _outer_where(outer, oa)
+    if where is None:
+        return None
+
+    # What the loop keeps: the whole row, or a dict made from it.
+    if append.source_expr == loop.loop_var:
+        select = f"{oa}.{outer_col}"
+        build = f"{append.target} = {outer.cursor}.fetchall()"
+    elif append.field_map and all(_column_for(e, loop.loop_var, outer) for e in append.field_map.values()):
+        parts = [(f"{oa}.{_column_for(e, loop.loop_var, outer)}", n) for n, e in append.field_map.items()]
+        select = ", ".join(f"{e} AS {n}" for e, n in parts)
+        row_dict = ", ".join(f'"{n}": r[{i}]' for i, (_, n) in enumerate(parts))
+        build = f"{append.target} = [{{{row_dict}}} for r in {outer.cursor}.fetchall()]"
+    else:
+        return None
+
+    if mc.negated:
+        ne_sql, lj_sql = _anti_join_forms(select, outer.table, oa, inner.table, ia, match, inner_filters, where + [None])
+        sql = ne_sql + "\n\n-- or --\n\n" + lj_sql
+        code = _anti_join_code(outer.cursor, ne_sql, lj_sql, build, (inner.table, inner_col))
+        kind, pattern = "an anti-join (rows with no match)", "MANUAL_ANTI_JOIN"
+    else:
+        exists = (
+            "EXISTS (\n    SELECT 1\n" f"    FROM {inner.table} {ia}\n    WHERE "
+            + "\n      AND ".join([match] + inner_filters) + "\n)"
+        )
+        sql = "\n".join([f"SELECT {select}", f"FROM {outer.table} {oa}", _where_block(where + [exists])])
+        code = f'{outer.cursor}.execute("""\n{textwrap.indent(sql, "    ")}\n""")\n{build}'
+        kind, pattern = "a semi-join (rows with a match)", "MANUAL_SEMI_JOIN"
+
+    return RewriteHint(
+        pattern=pattern,
+        lineno=loop.lineno,
+        explanation=(
+            f"`{mc.raw}` (line {append.lineno if append.guard else loop.lineno}) searches the whole "
+            f"`{mc.collection}` list for every row of `{loop.iter_source}`, one item at a time, so the "
+            f"work grows with ({outer.table} rows) x ({inner.table} rows). This is {kind} done by hand "
+            "in Python; one SQL query does it with an index lookup per row."
+        ),
+        sql=sql,
+        optimized_code=code,
+        caveats=[
+            f"The query that fills `{mc.collection}` (line {inner.lineno}) is no longer needed, unless "
+            "its rows are used somewhere else.",
+            "Python's `in` treats two missing values (None) as equal, but SQL never matches NULL with "
+            "NULL. The results can only differ for rows whose value is NULL.",
+            "Row order is unspecified in SQL; add ORDER BY if the order matters.",
+        ],
+        lines=sorted({outer.lineno, loop.lineno, append.lineno}),
+    )
+
+
+def _own_alias(q: QueryCall) -> Optional[str]:
+    """The alias a simple query gives its table, e.g. "r" in `FROM reviews r`."""
+    m = re.search(
+        rf"\bFROM\s+{re.escape(q.table or '')}\s+(?:AS\s+)?(?!(?:WHERE|LIMIT|JOIN|LEFT|ORDER|GROUP)\b)([A-Za-z_]\w*)",
+        q.raw_sql, re.I,
+    )
+    if not m or m.group(1).upper() in _SQL_KEYWORDS:
+        return None
+    return m.group(1)
+
+
+def _column_at_name(column: str) -> Optional[str]:
+    """`o.order_id` or `order_id AS id` -> the plain column name `order_id`
+    (None for anything that isn't a simple column)."""
+    name = re.split(r"\s+AS\s+", column.strip(), flags=re.I)[0].split(".")[-1].strip()
+    return name if re.fullmatch(r"[A-Za-z_]\w*", name) else None
 
 
 def _list_lookup(loop: LoopNode) -> Optional[RewriteHint]:
@@ -953,6 +1320,7 @@ def build_rewrite_hints(procedure_ast: ProcedureAST) -> List[RewriteHint]:
                 or _chain_rows(outer, loop, queries_by_var, top_level)
                 or _scalar_having(outer, loop)
                 or _semi_join(outer, loop)
+                or _membership_join(outer, loop, queries_by_var, top_level)
             )
             if outer is not None else _list_lookup(loop)
         )
@@ -960,4 +1328,11 @@ def build_rewrite_hints(procedure_ast: ProcedureAST) -> List[RewriteHint]:
             hints.append(hint)
     covered = {line for h in hints for line in h.lines}
     hints += [h for h in _count_only(procedure_ast, queries_by_var, top_level) if not covered & set(h.lines)]
+    # Finally, look inside every query's SQL for `NOT IN (subquery)`.
+    covered = {line for h in hints for line in h.lines}
+    for q in procedure_ast.top_queries + [q for l in loops for q in l.queries]:
+        if q.lineno not in covered:
+            hint = _not_in_null(q)
+            if hint:
+                hints.append(hint)
     return hints

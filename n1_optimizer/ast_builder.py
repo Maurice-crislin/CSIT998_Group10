@@ -27,8 +27,8 @@ import re
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .ast_model import (
-    AggregationOp, AppendOp, Condition, ExistsCheck, FetchedTable, ListUsage, LoopNode, ProcedureAST,
-    QueryCall,
+    AggregationOp, AppendOp, Condition, ExistsCheck, FetchedTable, ListUsage, LoopNode, MembershipCheck,
+    ProcedureAST, QueryCall,
 )
 from .rewrites import build_rewrite_hints
 from .sql_facts import condition_to_sql, has_limit, parse_select, resolve_row_field
@@ -588,11 +588,35 @@ def _var_comparison(test: ast.expr) -> Optional[Condition]:
     return Condition(raw=ast.unparse(test), sql=f"{left.id} {op} {right.value!r}")
 
 
-# Each comparison and its opposite, e.g. "==" and "!=", "<" and ">=".
+# Each comparison and its opposite, e.g. "==" and "!=", "<" and ">=", "in" and "not in".
 _NEGATED_CMP = {
     ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.GtE: ast.Lt,
     ast.Gt: ast.LtE, ast.LtE: ast.Gt, ast.Is: ast.IsNot, ast.IsNot: ast.Is,
+    ast.In: ast.NotIn, ast.NotIn: ast.In,
 }
+
+
+def _membership_check(body: List[ast.stmt], aliases: Aliases) -> Optional[MembershipCheck]:
+    """Detect a loop whose only filter is `x in other_list` / `x not in other_list`.
+
+    Both ways of writing the filter are understood:
+        if order not in reviewed:          if order in reviewed:
+            results.append(order)              continue
+                                           results.append(order)
+    (the second one keeps the rows *not* in the list, like the first)."""
+    tests = _filter_tests(body)
+    if len(tests) != 1:
+        return None
+    test = tests[0]
+    if not (
+        isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], (ast.In, ast.NotIn))
+        and isinstance(test.comparators[0], ast.Name)
+    ):
+        return None
+    return MembershipCheck(
+        item=_resolve_expr(test.left, aliases), collection=test.comparators[0].id,
+        negated=isinstance(test.ops[0], ast.NotIn), raw=ast.unparse(test),
+    )
 
 
 def _negate(test: ast.expr) -> ast.expr:
@@ -931,6 +955,7 @@ class _Builder:
                             conditions=conditions, opaque_filters=opaque_filters, guard=guard,
                             result_guard=_result_guard(stmt.body, body_queries),
                             exists_check=_exists_check(stmt.body, body_queries),
+                            membership=_membership_check(stmt.body, child_aliases),
                             queries=body_queries, appends=body_appends,
                             aggregations=body_aggs, nested_loops=nested,
                         )

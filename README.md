@@ -13,7 +13,9 @@ reads such a program (it never runs it) and points out problems like:
 | **Totals in Python** | adds up or counts rows in a loop | `SUM()` / `COUNT()` with `GROUP BY` |
 | **Filtering in Python** | fetches every row, then skips most with an `if` | a `WHERE` clause |
 | **Counting a list** | builds a list only to call `len()` on it | `SELECT COUNT(*)` |
-| **Existence check per row** | runs a query per row only to see if it finds anything | `WHERE [NOT] EXISTS (...)` |
+| **Existence check per row** | runs a query per row only to see if it finds anything | `WHERE EXISTS (...)`, or for "no match": `NOT EXISTS (...)` / `LEFT JOIN ... IS NULL` |
+| **`in` / `not in` in Python** | `if row not in other_rows:`, which searches the whole other list for every row | `EXISTS (...)`, or for `not in`: `NOT EXISTS (...)` / `LEFT JOIN ... IS NULL` |
+| **`NOT IN` with a subquery** | `WHERE x NOT IN (SELECT ...)`, which returns *nothing* if the subquery contains a NULL | a NULL-safe anti-join: `NOT EXISTS (...)` or `LEFT JOIN ... IS NULL` |
 
 ## How it works
 
@@ -39,7 +41,7 @@ findings: problem type, line, explanation, suggested code, caveats
 
 **Stage 1** uses Python's built-in `ast` module, which turns source code into
 a tree of objects (an "abstract syntax tree"). Because no AI is involved, its
-facts are exact. For six common loop patterns it also builds the fixed SQL
+facts are exact. For eight common patterns it also builds the fixed SQL
 itself (see [Built-in rewrites](#built-in-rewrites)).
 
 **Stage 2** asks an AI model (an LLM) to find problems and suggest fixes.
@@ -185,9 +187,47 @@ leaves the problem to the AI model instead of guessing.
 | Nested loops (a query per row, or `if a[0] != b[0]: continue` matching) with a running total or counter | `JOIN` + `SUM`/`COUNT` + `GROUP BY` (+ `HAVING` when the total is filtered afterwards) |
 | Nested loops that append one result per matching pair of rows | one `JOIN` query |
 | A `SELECT COUNT(*)` per row, followed by `if count > N:` | `GROUP BY ... HAVING COUNT(*) > N` |
-| A query per row, followed only by `if not rows:` / `if rows:` | `WHERE NOT EXISTS (...)` / `WHERE EXISTS (...)` |
+| A query per row, followed only by `if not rows:` | anti-join: `NOT EXISTS (...)` **or** `LEFT JOIN ... WHERE ... IS NULL` |
+| A query per row, followed only by `if rows:` | `WHERE EXISTS (...)` |
 | A list built only to call `len()` on it (also through several lists) | `SELECT COUNT(*) ... WHERE <all the filters>` |
 | A loop over a Python list of ids, one `fetchone()` query per id | one query with `WHERE id IN (...)` |
+| A loop keeping rows with `if row not in other_rows:` (both queries select one column) | anti-join: `NOT EXISTS (...)` **or** `LEFT JOIN ... WHERE ... IS NULL` |
+| The same with `if row in other_rows:` | `WHERE EXISTS (...)` |
+| A query with `col NOT IN (SELECT col FROM other_table ...)` | anti-join: `NOT EXISTS (...)` **or** `LEFT JOIN ... WHERE ... IS NULL` |
+
+### Anti-joins: two ways
+
+An *anti-join* finds rows that have **no** match in another table, for
+example orders without a review. The suggested code offers it written in two
+ways; both give the same result:
+
+```sql
+-- Option 1: NOT EXISTS -- for each order, check that no review exists
+SELECT o.order_id
+FROM olist_orders_dataset o
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM olist_order_reviews_dataset r
+    WHERE r.order_id = o.order_id
+)
+
+-- Option 2: LEFT JOIN + IS NULL -- join the reviews, keep orders that found none
+SELECT o.order_id
+FROM olist_orders_dataset o
+LEFT JOIN olist_order_reviews_dataset r ON r.order_id = o.order_id
+WHERE r.order_id IS NULL
+```
+
+`LEFT JOIN` keeps every order, even one without a review; for those, the
+review's columns come back empty (NULL). `WHERE r.order_id IS NULL` then keeps
+exactly those orders.
+
+Both replace `WHERE x NOT IN (SELECT ...)`, which has a trap: if the subquery
+returns even one NULL, `x NOT IN (..., NULL)` is never true, so the query
+silently returns no rows at all. Both forms are fastest with an index on the
+looked-up column; `NOT EXISTS` especially, because SQLite builds a temporary
+index for a JOIN by itself but not for `NOT EXISTS`. The suggested code
+includes the `CREATE INDEX` statement as a comment.
 
 Each of these was checked by running the original code and the rewritten
 code on the same test data and comparing the results. Any real difference is
