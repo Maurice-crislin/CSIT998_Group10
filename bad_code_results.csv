@@ -1,17 +1,19 @@
 ﻿file,status,finding_no,pattern,line,severity,explanation,suggested_code,caveats,elapsed_s,exit_code,raw_output
 bad_code_1.py,findings,1,N_PLUS_ONE,15,high,"Runs one query on olist_customers_dataset per element of `customer_ids` (line 15). A single `WHERE customer_id IN (...)` query fetches them all at once; the rows are then matched back to `customer_ids` in Python, so output order, duplicates and missing ids behave as before.","placeholders = "", "".join(""?"" * len(customer_ids))
 cursor.execute(
-    f""SELECT customer_id, * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})"",
+    f""SELECT * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})"",
     list(customer_ids),
 )
-rows_by_customer_id = {r[0]: r[1:] for r in cursor.fetchall()}
+key = [d[0] for d in cursor.description].index('customer_id')
+rows_by_customer_id = {r[key]: r for r in cursor.fetchall()}
 for customer_id in customer_ids:
     row = rows_by_customer_id.get(customer_id)
     if row:
         customers.append({""customer_id"": row[0], ""customer_city"": row[3]})","Assumes customer_id is unique in olist_customers_dataset: fetchone() took the first match, the dict keeps the last.
 Values in `customer_ids` must have the same type as the customer_id column for the dict lookup to match.
 SQLite limits bound parameters (999 on old builds); chunk `customer_ids` if it can be larger.
-Values are now bound parameters instead of f-string interpolation, which also removes the SQL-injection risk.",72.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Values are now bound parameters instead of f-string interpolation, which also removes the SQL-injection risk.
+Only some columns are used: row[0] (called 'customer_id' in the code), row[3] (called 'customer_city' in the code). Selecting just those by name instead of * would move less data, but with SELECT * the analyzer can't confirm which column is at which position -- check the table and name them yourself.",165.5,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -21,10 +23,11 @@ Runs one query on olist_customers_dataset per element of `customer_ids` (line 15
 Suggested code:
 placeholders = "", "".join(""?"" * len(customer_ids))
 cursor.execute(
-    f""SELECT customer_id, * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})"",
+    f""SELECT * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})"",
     list(customer_ids),
 )
-rows_by_customer_id = {r[0]: r[1:] for r in cursor.fetchall()}
+key = [d[0] for d in cursor.description].index('customer_id')
+rows_by_customer_id = {r[key]: r for r in cursor.fetchall()}
 for customer_id in customer_ids:
     row = rows_by_customer_id.get(customer_id)
     if row:
@@ -35,6 +38,7 @@ Caveats:
 - Values in `customer_ids` must have the same type as the customer_id column for the dict lookup to match.
 - SQLite limits bound parameters (999 on old builds); chunk `customer_ids` if it can be larger.
 - Values are now bound parameters instead of f-string interpolation, which also removes the SQL-injection risk.
+- Only some columns are used: row[0] (called 'customer_id' in the code), row[3] (called 'customer_city' in the code). Selecting just those by name instead of * would move less data, but with SELECT * the analyzer can't confirm which column is at which position -- check the table and name them yourself.
 
 "
 bad_code_2.py,findings,1,N_PLUS_ONE,19,high,"Walks olist_customers_dataset -> olist_orders_dataset with a query per row, appending one result per matching row pair (line 28). A single JOIN query returns the same rows in one round trip.","cursor.execute(""""""
@@ -43,7 +47,7 @@ bad_code_2.py,findings,1,N_PLUS_ONE,19,high,"Walks olist_customers_dataset -> ol
     JOIN olist_orders_dataset o ON o.customer_id = c.customer_id
 """""")
 results = [{""customer_unique_id"": r[0], ""order_id"": r[1], ""status"": r[2]} for r in cursor.fetchall()]","Inner JOIN on purpose: outer rows with no match produced no output in the loop either.
-Row order is unspecified in both versions; add ORDER BY if the order matters.",106.6,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Row order is unspecified in both versions; add ORDER BY if the order matters.",103.8,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -68,7 +72,7 @@ bad_code_3.py,findings,1,COUNT_IN_PYTHON,18,high,"Fetches every row of olist_ord
     WHERE order_status = 'delivered'
 """""")
 delivered_orders_count = cursor.fetchone()[0]
-# then use delivered_orders_count in place of len(delivered_orders) (line 31)","Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.",205.0,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+# then use delivered_orders_count in place of len(delivered_orders) (line 31)","Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.",75.7,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -96,7 +100,7 @@ bad_code_4.py,findings,1,N_PLUS_ONE,18,high,"Walks olist_orders_dataset -> olist
 """""")
 order_totals = [{""order_id"": r[0], ""total"": r[1]} for r in cursor.fetchall()]","Assumes o.order_id identifies one row of olist_orders_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
 LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.
-Row order is unspecified in both versions; add ORDER BY if the order matters.",213.8,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Row order is unspecified in both versions; add ORDER BY if the order matters.",138.0,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -128,7 +132,7 @@ bad_code_5.py,findings,1,N_PLUS_ONE,27,high,"Walks olist_customers_dataset -> ol
 """""")
 customer_spending = [{""customer_unique_id"": r[0], ""total_spending"": r[1]} for r in cursor.fetchall()]","Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
 LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.
-Row order is unspecified in both versions; add ORDER BY if the order matters.",175.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Row order is unspecified in both versions; add ORDER BY if the order matters.",161.5,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -159,7 +163,7 @@ bad_code_6.py,findings,1,N_PLUS_ONE,17,high,Runs one COUNT(*) query per row of o
     HAVING COUNT(*) > 2
 """""")
 results = [{""customer_unique_id"": r[0], ""order_count"": r[1]} for r in cursor.fetchall()]","Returns each customer_unique_id once. The loop ran once per row of olist_customers_dataset's result, so a customer_unique_id that appears on several rows was appended once per row (duplicates); if those duplicates were intended, join this result back to the outer query.
-Row order is unspecified in both versions; add ORDER BY if the order matters.",210.8,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Row order is unspecified in both versions; add ORDER BY if the order matters.",110.0,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -191,7 +195,7 @@ bad_code_7.py,findings,1,N_PLUS_ONE,19,high,"Walks olist_products_dataset -> oli
 """""")
 results = [{""product_id"": r[0], ""category"": r[1], ""total_sales"": r[2], ""items_sold"": r[3]} for r in cursor.fetchall()]","Assumes p.product_id, p.product_category_name identifies one row of olist_products_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
 Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.
-Row order is unspecified in both versions; add ORDER BY if the order matters.",83.5,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Row order is unspecified in both versions; add ORDER BY if the order matters.",180.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -222,7 +226,7 @@ bad_code_8.py,findings,1,COUNT_IN_PYTHON,18,high,"Fetches every row of olist_ord
 """""")
 late_orders_count = cursor.fetchone()[0]
 # then use late_orders_count in place of len(late_orders) (line 62)","Compares timestamps as text instead of parsed datetimes: identical as long as every stored value is zero-padded ISO text (e.g. 2017-10-02 10:56:33), which datetime.strptime would otherwise also accept unpadded.
-Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.",169.4,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.",162.8,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -254,7 +258,7 @@ bad_code_9.py,findings,1,MANUAL_JOIN,41,high,"Walks olist_customers_dataset -> o
 """""")
 results = [{""customer_unique_id"": r[0], ""total_spending"": r[1]} for r in cursor.fetchall()]","Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.
 Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.
-Row order is unspecified in both versions; add ORDER BY if the order matters.",213.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+Row order is unspecified in both versions; add ORDER BY if the order matters.",223.4,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
@@ -279,69 +283,153 @@ Caveats:
 - Row order is unspecified in both versions; add ORDER BY if the order matters.
 
 "
-bad_code_10.py,no_issues,,,,,,,,122.4,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+bad_code_10.py,no_issues,,,,,,,,122.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 No issues detected.
 "
-bad_code_11.py,findings,1,MANUAL_JOIN,34,high,"Instead of one SQL query with three JOINs, the code manually re-implements a 3-level join in Python using nested dict lookups.","SELECT p.product_id, p.product_category_name, oi.order_id, oi.price, o.order_status
-FROM olist_products_dataset p
-JOIN olist_order_items_dataset oi ON p.product_id = oi.product_id
-JOIN olist_orders_dataset o ON oi.order_id = o.order_id
-WHERE o.order_status = 'delivered'
-GROUP BY p.product_id, oi.order_id, o.order_status
-ORDER BY p.product_category_name, oi.price, o.order_status;",The optimized code assumes that the order_status is 'delivered' for the manual join to work correctly.,171.2,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+bad_code_11.py,findings,1,MANUAL_JOIN,34,high,The code manually re-implements a 3-level join in Python using nested dict lookups.,"SELECT p.product_id, p.product_category_name FROM olist_products_dataset p JOIN (SELECT order_id, product_id, price FROM olist_order_items_dataset) oi ON p.product_id = oi.product_id JOIN (SELECT order_id, customer_id, order_status FROM olist_orders_dataset) o ON oi.order_id = o.order_id","The optimized code assumes that the order_id, product_id, and customer_id columns are present in the respective tables.",180.6,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
 
 === Stage 2: LLM-suggested optimizations ===
 
 --- Finding 1: MANUAL_JOIN (line 34, severity: high) ---
-Instead of one SQL query with three JOINs, the code manually re-implements a 3-level join in Python using nested dict lookups.
+The code manually re-implements a 3-level join in Python using nested dict lookups.
 
 Suggested code:
-SELECT p.product_id, p.product_category_name, oi.order_id, oi.price, o.order_status
-FROM olist_products_dataset p
-JOIN olist_order_items_dataset oi ON p.product_id = oi.product_id
-JOIN olist_orders_dataset o ON oi.order_id = o.order_id
-WHERE o.order_status = 'delivered'
-GROUP BY p.product_id, oi.order_id, o.order_status
-ORDER BY p.product_category_name, oi.price, o.order_status;
+SELECT p.product_id, p.product_category_name FROM olist_products_dataset p JOIN (SELECT order_id, product_id, price FROM olist_order_items_dataset) oi ON p.product_id = oi.product_id JOIN (SELECT order_id, customer_id, order_status FROM olist_orders_dataset) o ON oi.order_id = o.order_id
 
 Caveats:
-- The optimized code assumes that the order_status is 'delivered' for the manual join to work correctly.
+- The optimized code assumes that the order_id, product_id, and customer_id columns are present in the respective tables.
 
 "
-bad_code_12.py,findings,1,N_PLUS_ONE,10,high,Runs one query on orders per row of customers (line 10) only to check whether it returns anything (`not orders`). That is an anti-join: WHERE NOT EXISTS with a correlated subquery answers it for every row in one query.,"cursor.execute(""""""
-    SELECT c.*
-    FROM customers c
-    WHERE NOT EXISTS (
-        SELECT 1 FROM orders o
-        WHERE o.customer_id = c.customer_id
-    )
-"""""")
-results = cursor.fetchall()","NOT EXISTS rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL.
-An index on orders(customer_id) lets each EXISTS probe be a lookup instead of a scan.
-Row order is unspecified in both versions; add ORDER BY if the order matters.
-The key is compared column-to-column instead of being pasted into the SQL text, which also removes the SQL-injection risk of the f-string.",92.3,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
-
-=== Stage 2: LLM-suggested optimizations ===
-
---- Finding 1: N_PLUS_ONE (line 10, severity: high) ---
-Runs one query on orders per row of customers (line 10) only to check whether it returns anything (`not orders`). That is an anti-join: WHERE NOT EXISTS with a correlated subquery answers it for every row in one query.
-
-Suggested code:
+bad_code_12.py,findings,1,N_PLUS_ONE,10,high,"Runs one query on olist_order_items_dataset per row of olist_orders_dataset (line 10) only to check whether it returns anything (`not items`). That is an anti-join: NOT EXISTS with a correlated subquery, or LEFT JOIN + IS NULL, answers it for every row in one query.","# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.
 cursor.execute(""""""
-    SELECT c.*
-    FROM customers c
+    SELECT o.order_id, o.customer_id, o.order_status
+    FROM olist_orders_dataset o
     WHERE NOT EXISTS (
-        SELECT 1 FROM orders o
-        WHERE o.customer_id = c.customer_id
+        SELECT 1
+        FROM olist_order_items_dataset oi
+        WHERE oi.order_id = o.order_id
     )
 """""")
 results = cursor.fetchall()
 
+# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.
+cursor.execute(""""""
+    SELECT o.order_id, o.customer_id, o.order_status
+    FROM olist_orders_dataset o
+    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    WHERE oi.order_id IS NULL
+"""""")
+results = cursor.fetchall()
+
+# Both are fastest with an index on the column they look up. Option 1 especially needs it:
+# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.
+# Create it once if missing:
+# CREATE INDEX IF NOT EXISTS ix_olist_order_items_dataset_order_id ON olist_order_items_dataset(order_id);","NOT EXISTS / LEFT JOIN + IS NULL rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL.
+An index on olist_order_items_dataset(order_id) lets each lookup be quick instead of a scan.
+Row order is unspecified in both versions; add ORDER BY if the order matters.
+The key is compared column-to-column instead of being pasted into the SQL text, which also removes the SQL-injection risk of the f-string.",122.0,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: N_PLUS_ONE (line 10, severity: high) ---
+Runs one query on olist_order_items_dataset per row of olist_orders_dataset (line 10) only to check whether it returns anything (`not items`). That is an anti-join: NOT EXISTS with a correlated subquery, or LEFT JOIN + IS NULL, answers it for every row in one query.
+
+Suggested code:
+# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.
+cursor.execute(""""""
+    SELECT o.order_id, o.customer_id, o.order_status
+    FROM olist_orders_dataset o
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM olist_order_items_dataset oi
+        WHERE oi.order_id = o.order_id
+    )
+"""""")
+results = cursor.fetchall()
+
+# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.
+cursor.execute(""""""
+    SELECT o.order_id, o.customer_id, o.order_status
+    FROM olist_orders_dataset o
+    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id
+    WHERE oi.order_id IS NULL
+"""""")
+results = cursor.fetchall()
+
+# Both are fastest with an index on the column they look up. Option 1 especially needs it:
+# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.
+# Create it once if missing:
+# CREATE INDEX IF NOT EXISTS ix_olist_order_items_dataset_order_id ON olist_order_items_dataset(order_id);
+
 Caveats:
-- NOT EXISTS rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL.
-- An index on orders(customer_id) lets each EXISTS probe be a lookup instead of a scan.
+- NOT EXISTS / LEFT JOIN + IS NULL rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL.
+- An index on olist_order_items_dataset(order_id) lets each lookup be quick instead of a scan.
 - Row order is unspecified in both versions; add ORDER BY if the order matters.
 - The key is compared column-to-column instead of being pasted into the SQL text, which also removes the SQL-injection risk of the f-string.
+
+"
+bad_code_13.py,findings,1,NOT_IN_NULL,8,high,"`o.order_id NOT IN (SELECT r.order_id ...)` is an anti-join (rows with no match) written with NOT IN. If the subquery ever returns a NULL, `x NOT IN (..., NULL)` is never true and the query silently returns no rows. Two NULL-safe forms give the intended answer: NOT EXISTS, or LEFT JOIN + IS NULL.","# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.
+cursor.execute(""""""
+    SELECT o.order_id
+    FROM olist_orders_dataset o
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM olist_order_reviews_dataset r
+        WHERE r.order_id = o.order_id
+    )
+"""""")
+
+# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.
+cursor.execute(""""""
+    SELECT o.order_id
+    FROM olist_orders_dataset o
+    LEFT JOIN olist_order_reviews_dataset r ON r.order_id = o.order_id
+    WHERE r.order_id IS NULL
+"""""")
+
+# Both are fastest with an index on the column they look up. Option 1 especially needs it:
+# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.
+# Create it once if missing:
+# CREATE INDEX IF NOT EXISTS ix_olist_order_reviews_dataset_order_id ON olist_order_reviews_dataset(order_id);","The result is the same as before whenever the subquery returns no NULLs. If it does return NULLs, the old query returned no rows at all; the new ones return the rows that really have no match.
+A row whose own o.order_id is NULL was left out by NOT IN but is kept by both new forms (nothing can match it). Add `AND o.order_id IS NOT NULL` to leave such rows out.
+LEFT JOIN + IS NULL returns each unmatched row once; it checks the column used for matching, which can only be NULL when no partner was found.
+To keep NOT IN instead, filter the NULLs out inside the subquery: `... NOT IN (SELECT col FROM t WHERE col IS NOT NULL)`.",143.3,0,"[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]
+
+=== Stage 2: LLM-suggested optimizations ===
+
+--- Finding 1: NOT_IN_NULL (line 8, severity: high) ---
+`o.order_id NOT IN (SELECT r.order_id ...)` is an anti-join (rows with no match) written with NOT IN. If the subquery ever returns a NULL, `x NOT IN (..., NULL)` is never true and the query silently returns no rows. Two NULL-safe forms give the intended answer: NOT EXISTS, or LEFT JOIN + IS NULL.
+
+Suggested code:
+# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.
+cursor.execute(""""""
+    SELECT o.order_id
+    FROM olist_orders_dataset o
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM olist_order_reviews_dataset r
+        WHERE r.order_id = o.order_id
+    )
+"""""")
+
+# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.
+cursor.execute(""""""
+    SELECT o.order_id
+    FROM olist_orders_dataset o
+    LEFT JOIN olist_order_reviews_dataset r ON r.order_id = o.order_id
+    WHERE r.order_id IS NULL
+"""""")
+
+# Both are fastest with an index on the column they look up. Option 1 especially needs it:
+# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.
+# Create it once if missing:
+# CREATE INDEX IF NOT EXISTS ix_olist_order_reviews_dataset_order_id ON olist_order_reviews_dataset(order_id);
+
+Caveats:
+- The result is the same as before whenever the subquery returns no NULLs. If it does return NULLs, the old query returned no rows at all; the new ones return the rows that really have no match.
+- A row whose own o.order_id is NULL was left out by NOT IN but is kept by both new forms (nothing can match it). Add `AND o.order_id IS NOT NULL` to leave such rows out.
+- LEFT JOIN + IS NULL returns each unmatched row once; it checks the column used for matching, which can only be NULL when no partner was found.
+- To keep NOT IN instead, filter the NULLs out inside the subquery: `... NOT IN (SELECT col FROM t WHERE col IS NOT NULL)`.
 
 "

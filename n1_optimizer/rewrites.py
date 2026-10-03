@@ -1122,7 +1122,14 @@ def _list_lookup(loop: LoopNode) -> Optional[RewriteHint]:
                 customers.append({"id": row[0], "city": row[3]})
     becomes one query, `SELECT ... WHERE customer_id IN (?, ?, ...)`, and
     then a normal loop matches the rows back to the list. That keeps the
-    list's order, repeated ids and missing ids the same as before."""
+    list's order, repeated ids and missing ids the same as before.
+
+    Which columns are selected:
+      - If the query lists its columns, only the ones the code uses are
+        selected, and `row[i]` is renumbered to match.
+      - With SELECT *, the query stays SELECT *: without the database we
+        can't know which column is at position i. The code then finds the
+        id column's position at run time from `cursor.description`."""
     if loop.iterates_query_result or loop.conditions or loop.nested_loops or loop.aggregations:
         return None
     if len(loop.queries) != 1 or len(loop.appends) != 1 or not re.fullmatch(r"\w+", loop.iter_source):
@@ -1141,19 +1148,63 @@ def _list_lookup(loop: LoopNode) -> Optional[RewriteHint]:
             return None
 
     key, row, items = m.group("col"), q.result_var, loop.iter_source
-    columns = ", ".join(q.columns)
-    fields = ", ".join(f'"{name}": {expr}' for name, expr in append.field_map.items())
-    # The id column is selected first, before the original columns. The
-    # code then removes it again (r[1:]), so row[0], row[1], ... still
-    # mean the same columns as in the original code.
-    sql = f"SELECT {key}, {columns} FROM {q.table} WHERE {key} IN (...)"
+    select_star = q.columns == ["*"]
+    caveats_extra: List[str] = []
+    if select_star:
+        # With SELECT * we can't know which position holds which column, so
+        # the query keeps SELECT *, and the code asks the database at run
+        # time where the id column is (cursor.description lists the names).
+        select = "*"
+        find_key = f"key = [d[0] for d in {q.cursor}.description].index({key!r})\n"
+        key_ref = "r[key]"
+        fields = ", ".join(f'"{name}": {expr}' for name, expr in append.field_map.items())
+        if q.used_indexes:
+            guessed = ", ".join(f"row[{i}] (called {name!r} in the code)" for i, name in sorted(q.used_indexes.items()))
+            caveats_extra.append(
+                f"Only some columns are used: {guessed}. Selecting just those by name instead of * would "
+                "move less data, but with SELECT * the analyzer can't confirm which column is at which "
+                "position -- check the table and name them yourself."
+            )
+    else:
+        # The columns are listed, so select only the ones the code uses
+        # (plus the id), and renumber row[i] to the new positions.
+        positions: List[int] = []         # original positions used, in order of first use
+        names: List[str] = []             # columns read by name (row["x"] / row.x)
+        for expr in append.field_map.values():
+            am = _ACCESSOR_RE.match(expr)
+            if am.group("idx") is not None:
+                i = int(am.group("idx"))
+                if not 0 <= i < len(q.columns) or not _column_at_name(q.columns[i]):
+                    return None
+                if i not in positions:
+                    positions.append(i)
+            elif (am.group("key") or am.group("attr")) not in names:
+                names.append(am.group("key") or am.group("attr"))
+        select_items = [q.columns[i].strip() for i in positions]
+        select_names = [_column_at_name(c) for c in select_items]
+        for n in names + [key]:
+            if n not in select_names:
+                select_items.append(n)
+                select_names.append(n)
+        select = ", ".join(select_items)
+        new_pos = {i: select_names.index(_column_at_name(q.columns[i])) for i in positions}
+        find_key = ""
+        key_ref = f"r[{select_names.index(key)}]"
+
+        def renumber(expr: str) -> str:
+            am = _ACCESSOR_RE.match(expr)
+            return f"{row}[{new_pos[int(am.group('idx'))]}]" if am.group("idx") is not None else expr
+        fields = ", ".join(f'"{name}": {renumber(expr)}' for name, expr in append.field_map.items())
+
+    sql = f"SELECT {select}\nFROM {q.table}\nWHERE {key} IN (?, ?, ...)"
     code = (
         f'placeholders = ", ".join("?" * len({items}))\n'
         f"{q.cursor}.execute(\n"
-        f'    f"SELECT {key}, {columns} FROM {q.table} WHERE {key} IN ({{placeholders}})",\n'
+        f'    f"SELECT {select} FROM {q.table} WHERE {key} IN ({{placeholders}})",\n'
         f"    list({items}),\n"
         f")\n"
-        f"rows_by_{key} = {{r[0]: r[1:] for r in {q.cursor}.fetchall()}}\n"
+        f"{find_key}"
+        f"rows_by_{key} = {{{key_ref}: r for r in {q.cursor}.fetchall()}}\n"
         f"for {loop.loop_var} in {items}:\n"
         f"    {row} = rows_by_{key}.get({loop.loop_var})\n"
         f"    if {row}:\n"
@@ -1174,7 +1225,7 @@ def _list_lookup(loop: LoopNode) -> Optional[RewriteHint]:
             f"Values in `{items}` must have the same type as the {key} column for the dict lookup to match.",
             f"SQLite limits bound parameters (999 on old builds); chunk `{items}` if it can be larger.",
             "Values are now bound parameters instead of f-string interpolation, which also removes the SQL-injection risk.",
-        ],
+        ] + caveats_extra,
         lines=sorted({loop.lineno, q.lineno, append.lineno}),
     )
 

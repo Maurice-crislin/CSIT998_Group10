@@ -9,8 +9,7 @@ reads such a program (it never runs it) and points out problems like:
 | Problem | What the code does | Faster version |
 |---|---|---|
 | **N+1 queries** | runs one query for every row of another query | one query with a `JOIN` |
-| **Manual join** | matches rows of two tables with nested `for` loops | one query with a `JOIN` |
-| **Totals in Python** | adds up or counts rows in a loop | `SUM()` / `COUNT()` with `GROUP BY` |
+| **Manual join** | matches rows of two tables with nested `for` loops | one query with a `JOIN` || **Totals in Python** | adds up or counts rows in a loop | `SUM()` / `COUNT()` with `GROUP BY` |
 | **Filtering in Python** | fetches every row, then skips most with an `if` | a `WHERE` clause |
 | **Counting a list** | builds a list only to call `len()` on it | `SELECT COUNT(*)` |
 | **Existence check per row** | runs a query per row only to see if it finds anything | `WHERE EXISTS (...)`, or for "no match": `NOT EXISTS (...)` / `LEFT JOIN ... IS NULL` |
