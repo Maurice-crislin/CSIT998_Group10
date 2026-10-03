@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bad Code Results</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #EFEEEA;
+    --surface: #FFFFFF;
+    --surface-2: #F6F5F1;
+    --ink: #201F1C;
+    --ink-muted: #6B6862;
+    --border: #DBD8D1;
+    --accent: #6E4FA0;
+    --accent-ink: #513A78;
+
+    --a: #2F7D52;     /* suggestion produced */
+    --a-bg: #E7F3EC;
+    --a-ink: #1E5738;
+    --b: #2A5F8A;     /* expected */
+    --b-bg: #E8F0F5;
+    --b-ink: #1D435F;
+
+    --neutral: #7A8280;
+    --neutral-bg: #EDEFEC;
+
+    --diverge: #93650B;
+    --diverge-bg: #FBF1DE;
+    --agree: #4C7A63;
+    --agree-bg: #E9F1EC;
+
+    --radius: 10px;
+    --font-head: 'Space Grotesk', sans-serif;
+    --font-body: 'IBM Plex Sans', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]){
+      --bg: #17161A;
+      --surface: #201F24;
+      --surface-2: #24232A;
+      --ink: #E8E6E9;
+      --ink-muted: #9C98A0;
+      --border: #37353D;
+      --accent: #B29CDD;
+      --accent-ink: #CBBAEA;
+
+      --a: #7FC79E;
+      --a-bg: #1C2E23;
+      --a-ink: #9AD9B6;
+      --b: #7CA9CB;
+      --b-bg: #1C2A34;
+      --b-ink: #A6C7E1;
+
+      --neutral: #A8B2AC;
+      --neutral-bg: #262B27;
+
+      --diverge: #D8AE5E;
+      --diverge-bg: #362D18;
+      --agree: #8FBFA4;
+      --agree-bg: #1C2921;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg: #17161A;
+    --surface: #201F24;
+    --surface-2: #24232A;
+    --ink: #E8E6E9;
+    --ink-muted: #9C98A0;
+    --border: #37353D;
+    --accent: #B29CDD;
+    --accent-ink: #CBBAEA;
+
+    --a: #7FC79E;
+    --a-bg: #1C2E23;
+    --a-ink: #9AD9B6;
+    --b: #7CA9CB;
+    --b-bg: #1C2A34;
+    --b-ink: #A6C7E1;
+
+    --neutral: #A8B2AC;
+    --neutral-bg: #262B27;
+
+    --diverge: #D8AE5E;
+    --diverge-bg: #362D18;
+    --agree: #8FBFA4;
+    --agree-bg: #1C2921;
+  }
+
+  *{ box-sizing: border-box; }
+  html, body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  body{ min-height: 100vh; padding: 0 0 80px; }
+  a { color: var(--accent-ink); }
+
+  .wrap{ max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  header.top{
+    padding: 56px 0 28px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .kicker{
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink-muted);
+    letter-spacing: 0.02em;
+    margin: 0 0 10px;
+  }
+  h1{
+    font-family: var(--font-head);
+    font-weight: 600;
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.15;
+    margin: 0 0 14px;
+    max-width: 22ch;
+  }
+  .sub{
+    color: var(--ink-muted);
+    font-size: 16px;
+    line-height: 1.6;
+    max-width: 70ch;
+    margin: 0 0 24px;
+  }
+  .sub b{ color: var(--ink); font-weight: 600; }
+
+  .legend-row{ display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 26px; }
+  .legend-item{ display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-muted); }
+  .legend-swatch{ width: 11px; height: 11px; border-radius: 3px; flex: none; }
+  .legend-item b{ color: var(--ink); font-weight: 600; }
+
+  .stats{ display: flex; flex-wrap: wrap; gap: 28px; }
+  .stat{ min-width: 110px; }
+  .stat .num{ font-family: var(--font-head); font-weight: 600; font-size: 26px; line-height: 1; }
+  .stat .num[data-tone="a"]{ color: var(--a); }
+  .stat .num[data-tone="b"]{ color: var(--b); }
+  .stat .num[data-tone="diverge"]{ color: var(--diverge); }
+  .stat .label{ margin-top: 6px; font-size: 12.5px; color: var(--ink-muted); }
+
+  .controls{
+    position: sticky; top: 0; z-index: 20;
+    background: var(--bg);
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  .search{ flex: 1 1 220px; position: relative; }
+  .search input{
+    width: 100%;
+    padding: 9px 12px 9px 34px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 14px;
+  }
+  .search input:focus{ outline: 2px solid var(--accent); outline-offset: 1px; }
+  .search svg{
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    width: 15px; height: 15px; color: var(--ink-muted); pointer-events: none;
+  }
+
+  .segmented{ display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex: none; }
+  .segmented button{
+    font-family: var(--font-body);
+    font-size: 13px; font-weight: 500;
+    padding: 8px 14px;
+    border: none;
+    background: var(--surface);
+    color: var(--ink-muted);
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+  }
+  .segmented button:last-child{ border-right: none; }
+  .segmented button[data-active="true"]{ background: var(--accent); color: #fff; }
+
+  .ghost-btn{
+    font-family: var(--font-body); font-size: 13px; font-weight: 500;
+    padding: 8px 14px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-muted);
+    cursor: pointer; flex: none;
+  }
+  .ghost-btn:hover{ border-color: var(--accent); color: var(--ink); }
+
+  #resultCount{ font-size: 13px; color: var(--ink-muted); margin: 0 0 16px; }
+
+  /* ---------- File cards ---------- */
+  .file-card{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .file-card[data-has="false"]{ border-color: var(--diverge); }
+
+  .file-head{ display: flex; align-items: center; gap: 14px; padding: 16px 18px; cursor: pointer; user-select: none; }
+  .file-head:hover{ background: var(--surface-2); }
+  .chev{ width: 18px; height: 18px; flex: none; color: var(--ink-muted); transition: transform .25s ease; }
+  .file-card[data-open="true"] .chev{ transform: rotate(90deg); }
+
+  .file-title{ flex: 1; min-width: 0; }
+  .file-title .fname{ font-family: var(--font-mono); font-size: 14.5px; font-weight: 500; color: var(--ink); }
+  .file-title .fpath{
+    font-size: 12.5px; color: var(--ink-muted); margin-top: 2px;
+    font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .badges{ display: flex; gap: 6px; flex: none; align-items: center; }
+  .verdict-pill{ font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+  .verdict-pill[data-v="diverge"]{ color: var(--diverge); background: var(--diverge-bg); }
+  .verdict-pill[data-v="agree"]{ color: var(--agree); background: var(--agree-bg); }
+  .pattern-pill{
+    font-size: 11.5px; font-family: var(--font-mono);
+    padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--ink-muted);
+    white-space: nowrap;
+  }
+  .tool-count{
+    font-size: 12px; font-family: var(--font-mono);
+    padding: 3px 8px; border-radius: 999px;
+    border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .tool-count .sw{ width: 7px; height: 7px; border-radius: 50%; }
+
+  .file-body-grid{ display: grid; grid-template-rows: 0fr; transition: grid-template-rows .32s ease; }
+  .file-card[data-open="true"] .file-body-grid{ grid-template-rows: 1fr; }
+  .file-body-inner{ overflow: hidden; }
+  .file-body{ padding: 18px; border-top: 1px solid var(--border); }
+
+  /* ---------- Panes ---------- */
+  .top-split{ display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
+  @media (max-width: 860px){ .top-split{ grid-template-columns: 1fr; } }
+
+  .pane{
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .pane-head{
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 14px;
+    font-family: var(--font-head);
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+  .pane-head .sw{ width: 9px; height: 9px; border-radius: 50%; background: currentColor; flex: none; }
+  .pane-head .path{ font-family: var(--font-mono); font-weight: 400; color: var(--ink-muted); }
+  .pane[data-tone="b"] .pane-head{ background: var(--b-bg); color: var(--b-ink); }
+  .pane[data-tone="a"] .pane-head{ background: var(--a-bg); color: var(--a-ink); }
+  .pane[data-tone="diverge"] .pane-head{ background: var(--diverge-bg); color: var(--diverge); }
+  .pane-head .spacer{ flex: 1; }
+
+  .copy-btn{
+    font-family: var(--font-body); font-size: 11.5px; font-weight: 500;
+    padding: 3px 9px; border-radius: 6px;
+    border: 1px solid currentColor; background: transparent; color: inherit;
+    cursor: pointer; opacity: .8;
+  }
+  .copy-btn:hover{ opacity: 1; }
+
+  .findings-row{
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .finding-chip{
+    font-size: 11.5px; font-weight: 600;
+    padding: 3px 9px; border-radius: 5px;
+    color: var(--a-ink); background: var(--a-bg);
+    font-family: var(--font-mono);
+  }
+  .finding-chip .sev{ font-weight: 400; opacity: .8; margin-left: 4px; }
+
+  .empty-col{ padding: 16px 14px 18px; font-size: 13px; color: var(--ink-muted); font-style: italic; background: var(--surface); }
+
+  .result-toggle-wrap{ padding: 14px 0 0; }
+  .result-btn{
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--ink);
+    font-family: var(--font-body); font-size: 12.5px; font-weight: 500;
+    padding: 7px 12px; border-radius: 7px; cursor: pointer;
+  }
+  .result-btn:hover{ border-color: var(--accent); }
+  .result-btn svg{ width: 13px; height: 13px; transition: transform .22s ease; }
+  .result-btn[data-open="true"] svg{ transform: rotate(180deg); }
+
+  .result-grid{ display: grid; grid-template-rows: 0fr; transition: grid-template-rows .32s ease; }
+  .result-grid[data-open="true"]{ grid-template-rows: 1fr; }
+  .result-grid-inner{ overflow: hidden; }
+
+  .terminal{
+    margin-top: 10px;
+    background: #14140F;
+    color: #DEDCD3;
+    border-radius: 7px;
+    padding: 13px 14px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 520px;
+    overflow-y: auto;
+  }
+  .terminal .hl-section{ color: #8A8C7E; }
+  .terminal .hl-title{ color: #9FCBAE; font-weight: 600; }
+  .terminal .hl-rule{ color: #E8C077; }
+  .terminal .hl-dash{ color: #8B8D80; }
+  .terminal .hl-label{ color: #8AB4E8; font-weight: 600; }
+  .terminal .hl-no{ color: #E0A85E; font-weight: 600; }
+
+  .code-scroll{ background: #14140F; overflow: auto; flex: 1; max-height: 640px; }
+  .code-grid{
+    display: table;
+    min-width: 100%;
+    width: max-content;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    padding: 10px 0;
+  }
+  .code-row{ display: table-row; }
+  .code-row .ln{
+    display: table-cell;
+    padding: 0 12px;
+    text-align: right;
+    color: #5C5B52;
+    user-select: none;
+    white-space: pre;
+    border-right: 1px solid rgba(255,255,255,0.08);
+  }
+  .code-row .lc{ display: table-cell; padding: 0 14px; white-space: pre; color: #DEDCD3; }
+  .tok-kw{ color: #8AB4E8; }
+  .tok-str{ color: #D7B369; }
+  .tok-comment{ color: #8A8C7E; font-style: italic; }
+  .tok-num{ color: #B98BD9; }
+  .tok-fn{ color: #9FCBAE; }
+
+  .empty-state{ text-align: center; padding: 60px 20px; color: var(--ink-muted); }
+
+  footer{
+    max-width: 1080px; margin: 40px auto 0; padding: 20px 24px 0;
+    color: var(--ink-muted); font-size: 12.5px; border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 560px){
+    .wrap{ padding: 0 16px; }
+    .stats{ gap: 18px; }
+    .file-title .fpath{ display:none; }
+    header.top{ padding: 40px 0 24px; }
+    .file-head{ flex-wrap: wrap; }
+    .badges{ flex-wrap: wrap; width: 100%; padding-left: 32px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <p class="kicker">procedural_code_optimizer &middot; bad_code test run &middot; llama3:latest</p>
+    <h1>13 bad-code files, expected vs suggested</h1>
+    <p class="sub">Each hand-written file in <b>tests/bad_code</b> was run through <b>cli.py</b>. For every file this page shows the <b>original code</b>, the <b>expected query</b> a human would write, the optimizer's <b>current suggested code</b>, and the <b>raw CLI output</b> it came from.</p>
+    <div class="legend-row">
+      <div class="legend-item"><span class="legend-swatch" style="background:var(--b);"></span><b>Expected query</b> &mdash; reference SQL for the file</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:var(--a);"></span><b>Suggested code</b> &mdash; what the optimizer produced</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:var(--diverge);"></span>files where no suggestion was produced</div>
+    </div>
+    <div class="stats" id="statsRow"></div>
+  </header>
+
+  <div class="controls">
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="searchInput" type="text" placeholder="Search files, patterns, code, output&hellip;">
+    </div>
+    <div class="segmented" id="segmented">
+      <button data-mode="all" data-active="true">All 13</button>
+      <button data-mode="has" data-active="false">With suggestion</button>
+      <button data-mode="none" data-active="false">No suggestion</button>
+    </div>
+    <button class="ghost-btn" id="expandAll">Expand all</button>
+  </div>
+
+  <p id="resultCount"></p>
+  <div id="fileList"></div>
+
+  <div class="empty-state" id="emptyState" style="display:none;">No files match your filters.</div>
+</div>
+
+<footer>
+  Source: bad_code_results_1.xlsx (13 rows: file, pattern, expected query, suggested_code, raw_output). Original code read from tests/bad_code. Findings are parsed from the "--- Finding N: KIND (line, severity) ---" headers in the raw output.
+</footer>
+
+<script>
+const DATA = [{"name": "bad_code_1.py", "path": "tests/bad_code/bad_code_1.py", "pattern": "N_PLUS_ONE", "expected": "SELECT customer_id, customer_city\nFROM olist_customers_dataset\nWHERE customer_id IN ()", "suggested": "placeholders = \", \".join(\"?\" * len(customer_ids))\ncursor.execute(\n    f\"SELECT * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})\",\n    list(customer_ids),\n)\nkey = [d[0] for d in cursor.description].index('customer_id')\nrows_by_customer_id = {r[key]: r for r in cursor.fetchall()}\nfor customer_id in customer_ids:\n    row = rows_by_customer_id.get(customer_id)\n    if row:\n        customers.append({\"customer_id\": row[0], \"customer_city\": row[3]})", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: N_PLUS_ONE (line 15, severity: high) ---\nRuns one query on olist_customers_dataset per element of `customer_ids` (line 15). A single `WHERE customer_id IN (...)` query fetches them all at once; the rows are then matched back to `customer_ids` in Python, so output order, duplicates and missing ids behave as before.\n\nSuggested code:\nplaceholders = \", \".join(\"?\" * len(customer_ids))\ncursor.execute(\n    f\"SELECT * FROM olist_customers_dataset WHERE customer_id IN ({placeholders})\",\n    list(customer_ids),\n)\nkey = [d[0] for d in cursor.description].index('customer_id')\nrows_by_customer_id = {r[key]: r for r in cursor.fetchall()}\nfor customer_id in customer_ids:\n    row = rows_by_customer_id.get(customer_id)\n    if row:\n        customers.append({\"customer_id\": row[0], \"customer_city\": row[3]})\n\nCaveats:\n- Assumes customer_id is unique in olist_customers_dataset: fetchone() took the first match, the dict keeps the last.\n- Values in `customer_ids` must have the same type as the customer_id column for the dict lookup to match.\n- SQLite limits bound parameters (999 on old builds); chunk `customer_ids` if it can be larger.\n- Values are now bound parameters instead of f-string interpolation, which also removes the SQL-injection risk.\n- Only some columns are used: row[0] (called 'customer_id' in the code), row[3] (called 'customer_city' in the code). Selecting just those by name instead of * would move less data, but with SELECT * the analyzer can't confirm which column is at which position -- check the table and name them yourself.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncustomer_ids = [\n    \"06b8999e2fba1a1fbc88172c00ba8bc7\",\n    \"18955e83d337fd6b2def6b18a428ac77\",\n    \"4e7b3e00288586ebd08712fdd0374a03\"\n]\n\ncustomers = []\n\nfor customer_id in customer_ids:\n    cursor.execute(\n        f\"\"\"\n        SELECT *\n        FROM olist_customers_dataset\n        WHERE customer_id = '{customer_id}'\n        \"\"\"\n    )\n\n    row = cursor.fetchone()\n\n    if row:\n        customers.append({\n            \"customer_id\": row[0],\n            \"customer_city\": row[3]\n        })\n\nprint(customers)\n\nconn.close()\n", "findings": [{"kind": "N_PLUS_ONE", "where": "line 15", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_2.py", "path": "tests/bad_code/bad_code_2.py", "pattern": "JOIN", "expected": "SELECT c.customer_unique_id, o.order_id, o.order_status\nFROM olist_customers_dataset c\nJOIN olist_orders_dataset o on c.customer_id=o.customer_id", "suggested": "cursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, o.order_id AS order_id, o.order_status AS status\n    FROM olist_customers_dataset c\n    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id\n\"\"\")\nresults = [{\"customer_unique_id\": r[0], \"order_id\": r[1], \"status\": r[2]} for r in cursor.fetchall()]", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: N_PLUS_ONE (line 19, severity: high) ---\nWalks olist_customers_dataset -> olist_orders_dataset with a query per row, appending one result per matching row pair (line 28). A single JOIN query returns the same rows in one round trip.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, o.order_id AS order_id, o.order_status AS status\n    FROM olist_customers_dataset c\n    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id\n\"\"\")\nresults = [{\"customer_unique_id\": r[0], \"order_id\": r[1], \"status\": r[2]} for r in cursor.fetchall()]\n\nCaveats:\n- Inner JOIN on purpose: outer rows with no match produced no output in the loop either.\n- Row order is unspecified in both versions; add ORDER BY if the order matters.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT customer_id, customer_unique_id\n    FROM olist_customers_dataset\n\"\"\")\n\ncustomers = cursor.fetchall()\n\nresults = []\n\nfor customer in customers:\n    customer_id = customer[0]\n    customer_unique_id = customer[1]\n\n    cursor.execute(f\"\"\"\n        SELECT order_id, order_status\n        FROM olist_orders_dataset\n        WHERE customer_id = '{customer_id}'\n    \"\"\")\n\n    orders = cursor.fetchall()\n\n    for order in orders:\n        results.append({\n            \"customer_unique_id\": customer_unique_id,\n            \"order_id\": order[0],\n            \"status\": order[1]\n        })\n\nprint(len(results))\nconn.close()\n", "findings": [{"kind": "N_PLUS_ONE", "where": "line 19", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_3.py", "path": "tests/bad_code/bad_code_3.py", "pattern": "COUNT", "expected": "SELECT COUNT(*) FROM olist_orders_dataset\nWHERE order_status='delivered'", "suggested": "cursor.execute(\"\"\"\n    SELECT COUNT(*) FROM olist_orders_dataset\n    WHERE order_status = 'delivered'\n\"\"\")\ndelivered_orders_count = cursor.fetchone()[0]\n# then use delivered_orders_count in place of len(delivered_orders) (line 31)", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: COUNT_IN_PYTHON (line 18, severity: high) ---\nFetches every row of olist_orders_dataset, filters and reshapes them in Python, only to take len(delivered_orders) (line 31). SELECT COUNT(*) with the same filters in WHERE returns that number directly, without transferring any rows.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT COUNT(*) FROM olist_orders_dataset\n    WHERE order_status = 'delivered'\n\"\"\")\ndelivered_orders_count = cursor.fetchone()[0]\n# then use delivered_orders_count in place of len(delivered_orders) (line 31)\n\nCaveats:\n- Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT order_id,\n           customer_id,\n           order_status,\n           order_purchase_timestamp\n    FROM olist_orders_dataset\n\"\"\")\n\norders = cursor.fetchall()\n\ndelivered_orders = []\n\nfor order in orders:\n    order_id = order[0]\n    customer_id = order[1]\n    status = order[2]\n    purchase_date = order[3]\n\n    if status == \"delivered\":\n        delivered_orders.append({\n            \"order_id\": order_id,\n            \"customer_id\": customer_id,\n            \"purchase_date\": purchase_date\n        })\n\nprint(len(delivered_orders))\nconn.close()\n", "findings": [{"kind": "COUNT_IN_PYTHON", "where": "line 18", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_4.py", "path": "tests/bad_code/bad_code_4.py", "pattern": "AGG 2 tables", "expected": "SELECT o.order_id, SUM(oi.price)\nFROM olist_orders_dataset o \nINNER JOIN olist_order_items_dataset oi ON o.order_id=oi.order_id\nWHERE o.order_status='delivered'\nGROUP BY order_id", "suggested": "cursor.execute(\"\"\"\n    SELECT o.order_id AS order_id, COALESCE(SUM(oi.price), 0) AS total\n    FROM olist_orders_dataset o\n    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    WHERE o.order_status = 'delivered'\n    GROUP BY o.order_id\n\"\"\")\norder_totals = [{\"order_id\": r[0], \"total\": r[1]} for r in cursor.fetchall()]", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: N_PLUS_ONE (line 18, severity: high) ---\nWalks olist_orders_dataset -> olist_order_items_dataset with a query per row and sums the innermost rows in Python (line 29), once per olist_orders_dataset row. A single query with JOINs and GROUP BY returns the same rows.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT o.order_id AS order_id, COALESCE(SUM(oi.price), 0) AS total\n    FROM olist_orders_dataset o\n    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    WHERE o.order_status = 'delivered'\n    GROUP BY o.order_id\n\"\"\")\norder_totals = [{\"order_id\": r[0], \"total\": r[1]} for r in cursor.fetchall()]\n\nCaveats:\n- Assumes o.order_id identifies one row of olist_orders_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.\n- LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.\n- Row order is unspecified in both versions; add ORDER BY if the order matters.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT order_id\n    FROM olist_orders_dataset\n    WHERE order_status = 'delivered'\n\"\"\")\n\norders = cursor.fetchall()\norder_totals = []\n\nfor order in orders:\n    order_id = order[0]\n\n    cursor.execute(f\"\"\"\n        SELECT price\n        FROM olist_order_items_dataset\n        WHERE order_id = '{order_id}'\n    \"\"\")\n\n    items = cursor.fetchall()\n    total = 0\n\n    for item in items:\n        price = item[0]\n        total = total + price\n\n    order_totals.append({\n        \"order_id\": order_id,\n        \"total\": total\n    })\n\nfor result in order_totals[:20]:\n    print(result)\n\nconn.close()\n", "findings": [{"kind": "N_PLUS_ONE", "where": "line 18", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_5.py", "path": "tests/bad_code/bad_code_5.py", "pattern": "AGG 3 tables", "expected": "SELECT c.customer_unique_id, total_spending=SUM (oi.price)\nFROM olist_customers_dataset c\nINNER JOIN olist_orders_dataset o ON c.customer_id=o.customer_id\nINNER JOIN olist_order_items_dataset oi ON oi.order_id=o.order_id\nGROUP BY c.customer_unique_id", "suggested": "cursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, COALESCE(SUM(oi.price), 0) AS total_spending\n    FROM olist_customers_dataset c\n    LEFT JOIN olist_orders_dataset o ON o.customer_id = c.customer_id\n    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    GROUP BY c.customer_id, c.customer_unique_id\n\"\"\")\ncustomer_spending = [{\"customer_unique_id\": r[0], \"total_spending\": r[1]} for r in cursor.fetchall()]", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: N_PLUS_ONE (line 27, severity: high) ---\nWalks olist_customers_dataset -> olist_orders_dataset -> olist_order_items_dataset with a query per row and sums the innermost rows in Python (line 41), once per olist_customers_dataset row. A single query with JOINs and GROUP BY returns the same rows.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, COALESCE(SUM(oi.price), 0) AS total_spending\n    FROM olist_customers_dataset c\n    LEFT JOIN olist_orders_dataset o ON o.customer_id = c.customer_id\n    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    GROUP BY c.customer_id, c.customer_unique_id\n\"\"\")\ncustomer_spending = [{\"customer_unique_id\": r[0], \"total_spending\": r[1]} for r in cursor.fetchall()]\n\nCaveats:\n- Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.\n- LEFT JOIN + COALESCE keep outer rows with no matches, with 0, exactly as the loop does.\n- Row order is unspecified in both versions; add ORDER BY if the order matters.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT customer_id, customer_unique_id\n    FROM olist_customers_dataset\n\"\"\")\n\ncustomers = cursor.fetchall()\n\ncursor.execute(\"\"\"\n    SELECT order_id, customer_id\n    FROM olist_orders_dataset\n\"\"\")\n\norders = cursor.fetchall()\n\ncustomer_spending = []\n\nfor customer in customers:\n    customer_id = customer[0]\n    customer_unique_id = customer[1]\n    total = 0\n\n    for order in orders:\n        order_id = order[0]\n        order_customer_id = order[1]\n\n        if order_customer_id == customer_id:\n            cursor.execute(f\"\"\"\n                SELECT price\n                FROM olist_order_items_dataset\n                WHERE order_id = '{order_id}'\n            \"\"\")\n\n            items = cursor.fetchall()\n\n            for item in items:\n                total += item[0]\n\n    customer_spending.append({\n        \"customer_unique_id\": customer_unique_id,\n        \"total_spending\": total\n    })\n\nprint(customer_spending[:20])\nconn.close()\n", "findings": [{"kind": "N_PLUS_ONE", "where": "line 27", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_6.py", "path": "tests/bad_code/bad_code_6.py", "pattern": "COUNT + HAVING", "expected": "SELECT c.customer_unique_id, order_count=COUNT(o.order_id)\nFROM olist_customers_dataset c\nINNER JOIN olist_orders_dataset o ON c.customer_id=o.customer_id\nGROUP BY c.customer_unique_id\nHAVING COUNT(o.order_id)>2", "suggested": "cursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, COUNT(*) AS order_count\n    FROM olist_customers_dataset c\n    JOIN olist_orders_dataset o ON c.customer_id = o.customer_id\n    GROUP BY c.customer_unique_id\n    HAVING COUNT(*) > 2\n\"\"\")\nresults = [{\"customer_unique_id\": r[0], \"order_count\": r[1]} for r in cursor.fetchall()]", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: N_PLUS_ONE (line 17, severity: high) ---\nRuns one COUNT(*) query per row of olist_customers_dataset (line 17) and filters the result in Python (`order_count > 2`). GROUP BY c.customer_unique_id with HAVING COUNT(*) > 2 computes every count and applies the filter in one query.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, COUNT(*) AS order_count\n    FROM olist_customers_dataset c\n    JOIN olist_orders_dataset o ON c.customer_id = o.customer_id\n    GROUP BY c.customer_unique_id\n    HAVING COUNT(*) > 2\n\"\"\")\nresults = [{\"customer_unique_id\": r[0], \"order_count\": r[1]} for r in cursor.fetchall()]\n\nCaveats:\n- Returns each customer_unique_id once. The loop ran once per row of olist_customers_dataset's result, so a customer_unique_id that appears on several rows was appended once per row (duplicates); if those duplicates were intended, join this result back to the outer query.\n- Row order is unspecified in both versions; add ORDER BY if the order matters.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT customer_unique_id\n    FROM olist_customers_dataset\n\"\"\")\n\ncustomers = cursor.fetchall()\nresults = []\n\nfor customer in customers:\n    customer_unique_id = customer[0]\n\n    cursor.execute(f\"\"\"\n        SELECT COUNT(*)\n        FROM olist_customers_dataset c\n        JOIN olist_orders_dataset o\n            ON c.customer_id = o.customer_id\n        WHERE c.customer_unique_id = '{customer_unique_id}'\n    \"\"\")\n\n    order_count = cursor.fetchone()[0]\n\n    if order_count > 2:\n        results.append({\n            \"customer_unique_id\": customer_unique_id,\n            \"order_count\": order_count\n        })\n\nprint(results)\nconn.close()\n", "findings": [{"kind": "N_PLUS_ONE", "where": "line 17", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_7.py", "path": "tests/bad_code/bad_code_7.py", "pattern": "AGG + HAVING", "expected": "SELECT o.product_id, category=p.product_category_name, total_sales=SUM(o.price), items_sold=COUNT(o.product_id)\n    FROM olist_products_dataset p \n    INNER JOIN olist_order_items_dataset o on p.product_id=o.product_id\n    WHERE p.product_category_name IS NOT NULL\nGROUP BY o.product_id, p.product_category_name\nHAVING SUM(o.price)>5000", "suggested": "cursor.execute(\"\"\"\n    SELECT p.product_id AS product_id, p.product_category_name AS category, SUM(oi.price) AS total_sales, COUNT(oi.product_id) AS items_sold\n    FROM olist_products_dataset p\n    JOIN olist_order_items_dataset oi ON oi.product_id = p.product_id AND oi.price IS NOT NULL\n    WHERE p.product_category_name IS NOT NULL\n    GROUP BY p.product_id, p.product_category_name\n    HAVING SUM(oi.price) > 5000\n\"\"\")\nresults = [{\"product_id\": r[0], \"category\": r[1], \"total_sales\": r[2], \"items_sold\": r[3]} for r in cursor.fetchall()]", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: N_PLUS_ONE (line 19, severity: high) ---\nWalks olist_products_dataset -> olist_order_items_dataset with a query per row and counts and sums the innermost rows in Python (line 34, 35), once per olist_products_dataset row, then keeps only rows where `total_sales > 5000`. A single query with JOINs and GROUP BY ... HAVING returns the same rows.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT p.product_id AS product_id, p.product_category_name AS category, SUM(oi.price) AS total_sales, COUNT(oi.product_id) AS items_sold\n    FROM olist_products_dataset p\n    JOIN olist_order_items_dataset oi ON oi.product_id = p.product_id AND oi.price IS NOT NULL\n    WHERE p.product_category_name IS NOT NULL\n    GROUP BY p.product_id, p.product_category_name\n    HAVING SUM(oi.price) > 5000\n\"\"\")\nresults = [{\"product_id\": r[0], \"category\": r[1], \"total_sales\": r[2], \"items_sold\": r[3]} for r in cursor.fetchall()]\n\nCaveats:\n- Assumes p.product_id, p.product_category_name identifies one row of olist_products_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.\n- Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.\n- Row order is unspecified in both versions; add ORDER BY if the order matters.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT product_id, product_category_name\n    FROM olist_products_dataset\n    WHERE product_category_name IS NOT NULL\n\"\"\")\n\nproducts = cursor.fetchall()\nresults = []\n\nfor product in products:\n    product_id = product[0]\n    category = product[1]\n\n    cursor.execute(f\"\"\"\n        SELECT price\n        FROM olist_order_items_dataset\n        WHERE product_id = '{product_id}'\n    \"\"\")\n\n    items = cursor.fetchall()\n\n    total_sales = 0\n    item_count = 0\n\n    for item in items:\n        price = item[0]\n\n        if price is not None:\n            total_sales += price\n            item_count += 1\n\n    if total_sales > 5000:\n        results.append({\n            \"product_id\": product_id,\n            \"category\": category,\n            \"total_sales\": total_sales,\n            \"items_sold\": item_count\n        })\n\nresults.sort(key=lambda x: x[\"total_sales\"], reverse=True)\n\nprint(results[:20])\nconn.close()\n", "findings": [{"kind": "N_PLUS_ONE", "where": "line 19", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_8.py", "path": "tests/bad_code/bad_code_8.py", "pattern": "COUNT", "expected": "SELECT COUNT(1)\nFROM olist_orders_dataset\nWHERE order_purchase_timestamp IS NOT NULL\nAND order_delivered_customer_date IS NOT NULL\nAND order_estimated_delivery_date IS NOT NULL \nAND order_delivered_customer_date > order_estimated_delivery_date", "suggested": "cursor.execute(\"\"\"\n    SELECT COUNT(*) FROM olist_orders_dataset\n    WHERE order_purchase_timestamp IS NOT NULL\n      AND ((order_estimated_delivery_date IS NOT NULL AND order_delivered_customer_date IS NOT NULL) AND (order_delivered_customer_date > order_estimated_delivery_date))\n\"\"\")\nlate_orders_count = cursor.fetchone()[0]\n# then use late_orders_count in place of len(late_orders) (line 62)", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: COUNT_IN_PYTHON (line 18, severity: high) ---\nFetches every row of olist_orders_dataset, filters and reshapes them in Python, only to take len(late_orders) (line 62). SELECT COUNT(*) with the same filters in WHERE returns that number directly, without transferring any rows.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT COUNT(*) FROM olist_orders_dataset\n    WHERE order_purchase_timestamp IS NOT NULL\n      AND ((order_estimated_delivery_date IS NOT NULL AND order_delivered_customer_date IS NOT NULL) AND (order_delivered_customer_date > order_estimated_delivery_date))\n\"\"\")\nlate_orders_count = cursor.fetchone()[0]\n# then use late_orders_count in place of len(late_orders) (line 62)\n\nCaveats:\n- Compares timestamps as text instead of parsed datetimes: identical as long as every stored value is zero-padded ISO text (e.g. 2017-10-02 10:56:33), which datetime.strptime would otherwise also accept unpadded.\n- Other per-row work in the dropped loop(s) doesn't affect the count and is skipped; if it could raise (e.g. parsing a malformed date), the original would have crashed instead.", "source": "import sqlite3\nfrom datetime import datetime\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT order_id,\n           order_purchase_timestamp,\n           order_delivered_customer_date,\n           order_estimated_delivery_date\n    FROM olist_orders_dataset\n\"\"\")\n\norders = cursor.fetchall()\nresults = []\n\nfor order in orders:\n    order_id = order[0]\n    purchase_date = order[1]\n    delivered_date = order[2]\n    estimated_date = order[3]\n\n    if purchase_date is None:\n        continue\n\n    purchase = datetime.strptime(\n        purchase_date,\n        \"%Y-%m-%d %H:%M:%S\"\n    )\n\n    if delivered_date is not None:\n        delivered = datetime.strptime(\n            delivered_date,\n            \"%Y-%m-%d %H:%M:%S\"\n        )\n        delivery_days = (delivered - purchase).days\n    else:\n        delivery_days = 0\n\n    if estimated_date is not None and delivered_date is not None:\n        estimated = datetime.strptime(\n            estimated_date,\n            \"%Y-%m-%d %H:%M:%S\"\n        )\n        late = delivered > estimated\n    else:\n        late = False\n\n    results.append({\n        \"order_id\": order_id,\n        \"delivery_days\": delivery_days,\n        \"late\": late\n    })\n\nlate_orders = []\n\nfor result in results:\n    if result[\"late\"]:\n        late_orders.append(result)\n\nprint(\"Total late orders:\", len(late_orders))\nconn.close()\n", "findings": [{"kind": "COUNT_IN_PYTHON", "where": "line 18", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_9.py", "path": "tests/bad_code/bad_code_9.py", "pattern": "AGG 4 tables + HAVING", "expected": "SELECT c.customer_unique_id,total_spending=SUM(oi.price)\nFROM olist_customers_dataset c\nINNER JOIN olist_orders_dataset o ON c.customer_id=o.customer_id\nINNER JOIN olist_order_items_dataset oi ON  ON oi.order_id=o.order_id\nINNER JOIN olist_products_dataset p on p.product_id=oi.product_id\nWHERE p.product_category_name='beleza_saude'\nGROUP BY c.customer_unique_id\nHAVING SUM(oi.price)>100", "suggested": "cursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, SUM(oi.price) AS total_spending\n    FROM olist_customers_dataset c\n    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id\n    JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    JOIN olist_products_dataset p ON p.product_id = oi.product_id AND p.product_category_name = 'beleza_saude' AND oi.price IS NOT NULL\n    GROUP BY c.customer_id, c.customer_unique_id\n    HAVING SUM(oi.price) > 100\n\"\"\")\nresults = [{\"customer_unique_id\": r[0], \"total_spending\": r[1]} for r in cursor.fetchall()]", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: MANUAL_JOIN (line 41, severity: high) ---\nWalks olist_customers_dataset -> olist_orders_dataset -> olist_order_items_dataset -> olist_products_dataset with nested Python loops and sums the innermost rows in Python (line 65), once per olist_customers_dataset row, then keeps only rows where `total_spending > 100`. A single query with JOINs and GROUP BY ... HAVING returns the same rows.\n\nSuggested code:\ncursor.execute(\"\"\"\n    SELECT c.customer_unique_id AS customer_unique_id, SUM(oi.price) AS total_spending\n    FROM olist_customers_dataset c\n    JOIN olist_orders_dataset o ON o.customer_id = c.customer_id\n    JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    JOIN olist_products_dataset p ON p.product_id = oi.product_id AND p.product_category_name = 'beleza_saude' AND oi.price IS NOT NULL\n    GROUP BY c.customer_id, c.customer_unique_id\n    HAVING SUM(oi.price) > 100\n\"\"\")\nresults = [{\"customer_unique_id\": r[0], \"total_spending\": r[1]} for r in cursor.fetchall()]\n\nCaveats:\n- Assumes c.customer_id, c.customer_unique_id identifies one row of olist_customers_dataset's result (true if it includes the primary key); otherwise GROUP BY merges rows the loop kept separate.\n- Plain JOIN: an outer row with no matches has all totals 0, which the HAVING filter rejects anyway, just like the loop's `if`.\n- Row order is unspecified in both versions; add ORDER BY if the order matters.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT customer_id, customer_unique_id\n    FROM olist_customers_dataset\n\"\"\")\n\ncustomers = cursor.fetchall()\n\ncursor.execute(\"\"\"\n    SELECT order_id, customer_id\n    FROM olist_orders_dataset\n\"\"\")\n\norders = cursor.fetchall()\n\ncursor.execute(\"\"\"\n    SELECT order_id, product_id, price\n    FROM olist_order_items_dataset\n\"\"\")\n\norder_items = cursor.fetchall()\n\ncursor.execute(\"\"\"\n    SELECT product_id, product_category_name\n    FROM olist_products_dataset\n\"\"\")\n\nproducts = cursor.fetchall()\n\nresults = []\n\nfor customer in customers:\n    customer_id = customer[0]\n    customer_unique_id = customer[1]\n    total_spending = 0\n\n    for order in orders:\n        order_id = order[0]\n        order_customer_id = order[1]\n\n        if order_customer_id != customer_id:\n            continue\n\n        for item in order_items:\n            item_order_id = item[0]\n            product_id = item[1]\n            price = item[2]\n\n            if item_order_id != order_id:\n                continue\n\n            for product in products:\n                product_id_db = product[0]\n                category = product[1]\n\n                if product_id_db != product_id:\n                    continue\n\n                if category == \"beleza_saude\":\n                    if price is not None:\n                        total_spending += price\n\n    if total_spending > 100:\n        results.append({\n            \"customer_unique_id\": customer_unique_id,\n            \"total_spending\": total_spending\n        })\n\nprint(results[:20])\nconn.close()\n", "findings": [{"kind": "MANUAL_JOIN", "where": "line 41", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_10.py", "path": "tests/bad_code/bad_code_10.py", "pattern": "SUBQUERY", "expected": "SELECT c.customer_unique_id,\n    COUNT(DISTINCT o.order_id) AS orders,\n    COALESCE(SUM(items.total_price), 0) AS total_price,\n    COALESCE(SUM(items.total_freight), 0) AS total_freight,\n    COALESCE(SUM(payments.total_payment), 0) AS total_payment,\n    COALESCE(AVG(reviews.average_review), 0) AS average_review\nFROM olist_customers_dataset c\nJOIN olist_orders_dataset o ON c.customer_id = o.customer_id\nLEFT JOIN (\n    SELECT  order_id,  SUM(price) AS total_price,  SUM(freight_value) AS total_freight\n    FROM olist_order_items_dataset\n    GROUP BY order_id\n) items ON o.order_id = items.order_id\nLEFT JOIN (\n    SELECT  order_id, SUM(payment_value) AS total_payment\n    FROM olist_order_payments_dataset\n    GROUP BY order_id\n) payments ON o.order_id = payments.order_id\nLEFT JOIN (\n    SELECT order_id, AVG(review_score) AS average_review\n    FROM olist_order_reviews_dataset\n    GROUP BY order_id\n) reviews ON o.order_id = reviews.order_id\nGROUP BY  c.customer_unique_id\nHAVING\n    COALESCE(SUM(items.total_price), 0) > 500\n    AND COALESCE(AVG(reviews.average_review), 0) < 3;", "suggested": "", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\nNo issues detected.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"\"\"\n    SELECT customer_id, customer_unique_id\n    FROM olist_customers_dataset\n\"\"\")\n\ncustomers = cursor.fetchall()\nfinal_report = []\n\nfor customer in customers:\n    customer_id = customer[0]\n    customer_unique_id = customer[1]\n\n    cursor.execute(f\"\"\"\n        SELECT order_id\n        FROM olist_orders_dataset\n        WHERE customer_id = '{customer_id}'\n    \"\"\")\n\n    orders = cursor.fetchall()\n\n    order_count = 0\n    total_price = 0\n    total_freight = 0\n    total_payment = 0\n    review_total = 0\n    review_count = 0\n\n    for order in orders:\n        order_id = order[0]\n        order_count += 1\n\n        cursor.execute(f\"\"\"\n            SELECT price, freight_value\n            FROM olist_order_items_dataset\n            WHERE order_id = '{order_id}'\n        \"\"\")\n\n        items = cursor.fetchall()\n\n        for item in items:\n            price = item[0]\n            freight = item[1]\n\n            if price is not None:\n                total_price += price\n\n            if freight is not None:\n                total_freight += freight\n\n        cursor.execute(f\"\"\"\n            SELECT payment_value\n            FROM olist_order_payments_dataset\n            WHERE order_id = '{order_id}'\n        \"\"\")\n\n        payments = cursor.fetchall()\n\n        for payment in payments:\n            if payment[0] is not None:\n                total_payment += payment[0]\n\n        cursor.execute(f\"\"\"\n            SELECT review_score\n            FROM olist_order_reviews_dataset\n            WHERE order_id = '{order_id}'\n        \"\"\")\n\n        reviews = cursor.fetchall()\n\n        for review in reviews:\n            if review[0] is not None:\n                review_total += review[0]\n                review_count += 1\n\n    if review_count > 0:\n        average_review = review_total / review_count\n    else:\n        average_review = 0\n\n    if order_count > 0:\n        final_report.append({\n            \"customer_unique_id\": customer_unique_id,\n            \"orders\": order_count,\n            \"total_price\": total_price,\n            \"total_freight\": total_freight,\n            \"total_payment\": total_payment,\n            \"average_review\": average_review\n        })\n\nfor row in final_report:\n    if row[\"total_price\"] > 500:\n        if row[\"average_review\"] < 3:\n            print(\n                row[\"customer_unique_id\"],\n                row[\"orders\"],\n                row[\"total_price\"],\n                row[\"total_freight\"],\n                row[\"total_payment\"],\n                row[\"average_review\"]\n            )\n\nconn.close()\n", "findings": [], "has_suggestion": false}, {"name": "bad_code_11.py", "path": "tests/bad_code/bad_code_11.py", "pattern": "AGG + STRING_AGG + HAVING", "expected": "SELECT customer_unique_id,\n       SUM(category_total) AS total_spent,\n       STRING_AGG(product_category_name, ', ') AS categories   -- SQLite: GROUP_CONCAT(product_category_name, ', ')\nFROM (\n    SELECT c.customer_id, c.customer_unique_id, p.product_category_name,\n           SUM(oi.price) AS category_total\n    FROM olist_customers_dataset c\n    JOIN olist_orders_dataset o        ON o.customer_id = c.customer_id\n    JOIN olist_order_items_dataset oi  ON oi.order_id = o.order_id\n    LEFT JOIN olist_products_dataset p ON p.product_id = oi.product_id\n    WHERE o.order_status = 'delivered'\n    GROUP BY c.customer_id, c.customer_unique_id, p.product_category_name\n) per_category\nGROUP BY customer_id, customer_unique_id\nHAVING SUM(category_total) > 0", "suggested": "SELECT p.product_id, p.product_category_name FROM olist_products_dataset p \nJOIN (SELECT order_id, product_id, price FROM olist_order_items_dataset) oi ON p.product_id = oi.product_id \nJOIN (SELECT order_id, customer_id, order_status FROM olist_orders_dataset) o ON oi.order_id = o.order_id", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: MANUAL_JOIN (line 34, severity: high) ---\nThe code manually re-implements a 3-level join in Python using nested dict lookups.\n\nSuggested code:\nSELECT p.product_id, p.product_category_name FROM olist_products_dataset p JOIN (SELECT order_id, product_id, price FROM olist_order_items_dataset) oi ON p.product_id = oi.product_id JOIN (SELECT order_id, customer_id, order_status FROM olist_orders_dataset) o ON oi.order_id = o.order_id\n\nCaveats:\n- The optimized code assumes that the order_id, product_id, and customer_id columns are present in the respective tables.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\n# Four separate queries, each fetched in full up front -- no query ever runs\n# inside a loop, so this is NOT the N+1 shape (nothing for pattern_detector\n# to correlate a loop variable against).\ncursor.execute(\"SELECT customer_id, customer_unique_id FROM olist_customers_dataset\")\ncustomers = cursor.fetchall()\n\ncursor.execute(\"SELECT order_id, customer_id, order_status FROM olist_orders_dataset\")\norders = cursor.fetchall()\n\ncursor.execute(\"SELECT order_id, product_id, price FROM olist_order_items_dataset\")\norder_items = cursor.fetchall()\n\ncursor.execute(\"SELECT product_id, product_category_name FROM olist_products_dataset\")\nproducts = cursor.fetchall()\n\n# Instead of one SQL query with three JOINs, the code manually re-implements\n# a 3-level join in Python using nested dict lookups.\norders_by_customer = {}\nfor order in orders:\n    order_id, customer_id, status = order\n    orders_by_customer.setdefault(customer_id, []).append((order_id, status))\n\nitems_by_order = {}\nfor item in order_items:\n    order_id, product_id, price = item\n    items_by_order.setdefault(order_id, []).append((product_id, price))\n\ncategory_by_product = {}\nfor product in products:\n    product_id, category = product\n    category_by_product[product_id] = category\n\nreport = []\nfor customer_id, customer_unique_id in customers:\n    customer_orders = orders_by_customer.get(customer_id, [])\n    total_spent = 0\n    categories_bought = set()\n\n    for order_id, status in customer_orders:\n        if status != \"delivered\":\n            continue\n\n        for product_id, price in items_by_order.get(order_id, []):\n            total_spent += price\n            categories_bought.add(category_by_product.get(product_id))\n\n    if total_spent > 0:\n        report.append({\n            \"customer_unique_id\": customer_unique_id,\n            \"total_spent\": total_spent,\n            \"categories\": list(categories_bought)\n        })\n\nconn.close()", "findings": [{"kind": "MANUAL_JOIN", "where": "line 34", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_12.py", "path": "tests/bad_code/bad_code_12.py", "pattern": "ANTI JOIN", "expected": "SELECT order_id, customer_id, order_status \nFROM olist_orders_dataset o\nWHERE NOT EXISTS (SELECT 1 FROM olist_order_items_dataset oi WHERE oi.order_id=o.order_id)", "suggested": "# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.\ncursor.execute(\"\"\"\n    SELECT o.order_id, o.customer_id, o.order_status\n    FROM olist_orders_dataset o\n    WHERE NOT EXISTS (\n        SELECT 1\n        FROM olist_order_items_dataset oi\n        WHERE oi.order_id = o.order_id\n    )\n\"\"\")\nresults = cursor.fetchall()\n\n# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.\ncursor.execute(\"\"\"\n    SELECT o.order_id, o.customer_id, o.order_status\n    FROM olist_orders_dataset o\n    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    WHERE oi.order_id IS NULL\n\"\"\")\nresults = cursor.fetchall()\n\n# Both are fastest with an index on the column they look up. Option 1 especially needs it:\n# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.\n# Create it once if missing:\n# CREATE INDEX IF NOT EXISTS ix_olist_order_items_dataset_order_id ON olist_order_items_dataset(order_id);", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: N_PLUS_ONE (line 10, severity: high) ---\nRuns one query on olist_order_items_dataset per row of olist_orders_dataset (line 10) only to check whether it returns anything (`not items`). That is an anti-join: NOT EXISTS with a correlated subquery, or LEFT JOIN + IS NULL, answers it for every row in one query.\n\nSuggested code:\n# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.\ncursor.execute(\"\"\"\n    SELECT o.order_id, o.customer_id, o.order_status\n    FROM olist_orders_dataset o\n    WHERE NOT EXISTS (\n        SELECT 1\n        FROM olist_order_items_dataset oi\n        WHERE oi.order_id = o.order_id\n    )\n\"\"\")\nresults = cursor.fetchall()\n\n# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.\ncursor.execute(\"\"\"\n    SELECT o.order_id, o.customer_id, o.order_status\n    FROM olist_orders_dataset o\n    LEFT JOIN olist_order_items_dataset oi ON oi.order_id = o.order_id\n    WHERE oi.order_id IS NULL\n\"\"\")\nresults = cursor.fetchall()\n\n# Both are fastest with an index on the column they look up. Option 1 especially needs it:\n# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.\n# Create it once if missing:\n# CREATE INDEX IF NOT EXISTS ix_olist_order_items_dataset_order_id ON olist_order_items_dataset(order_id);\n\nCaveats:\n- NOT EXISTS / LEFT JOIN + IS NULL rather than NOT IN: NOT IN returns no rows at all if the subquery yields a NULL.\n- An index on olist_order_items_dataset(order_id) lets each lookup be quick instead of a scan.\n- Row order is unspecified in both versions; add ORDER BY if the order matters.\n- The key is compared column-to-column instead of being pasted into the SQL text, which also removes the SQL-injection risk of the f-string.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\ncursor.execute(\"SELECT order_id, customer_id, order_status FROM olist_orders_dataset\")\norders = cursor.fetchall()\nresults = []\nfor order in orders:\n    cursor.execute(f\"SELECT * FROM olist_order_items_dataset WHERE order_id = '{order[0]}'\")\n    items = cursor.fetchall()\n    if not items:\n        results.append(order)\n\nprint(len(results))\nprint(results[:5])\nconn.close()\n", "findings": [{"kind": "N_PLUS_ONE", "where": "line 10", "severity": "high"}], "has_suggestion": true}, {"name": "bad_code_13.py", "path": "tests/bad_code/bad_code_13.py", "pattern": "ANTI JOIN", "expected": "SELECT o.order_id\nFROM olist_orders_dataset o\nLEFT JOIN olist_order_reviews_dataset r ON o.order_id=r.order_id\nWHERE r.order_id IS NULL", "suggested": "# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.\ncursor.execute(\"\"\"\n    SELECT o.order_id\n    FROM olist_orders_dataset o\n    WHERE NOT EXISTS (\n        SELECT 1\n        FROM olist_order_reviews_dataset r\n        WHERE r.order_id = o.order_id\n    )\n\"\"\")\n\n# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.\ncursor.execute(\"\"\"\n    SELECT o.order_id\n    FROM olist_orders_dataset o\n    LEFT JOIN olist_order_reviews_dataset r ON r.order_id = o.order_id\n    WHERE r.order_id IS NULL\n\"\"\")\n\n# Both are fastest with an index on the column they look up. Option 1 especially needs it:\n# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.\n# Create it once if missing:\n# CREATE INDEX IF NOT EXISTS ix_olist_order_reviews_dataset_order_id ON olist_order_reviews_dataset(order_id);", "raw": "[using Ollama model 'llama3:latest' at http://localhost:11434 for the optimization pass]\n\n=== Stage 2: LLM-suggested optimizations ===\n\n--- Finding 1: NOT_IN_NULL (line 8, severity: high) ---\n`o.order_id NOT IN (SELECT r.order_id ...)` is an anti-join (rows with no match) written with NOT IN. If the subquery ever returns a NULL, `x NOT IN (..., NULL)` is never true and the query silently returns no rows. Two NULL-safe forms give the intended answer: NOT EXISTS, or LEFT JOIN + IS NULL.\n\nSuggested code:\n# Option 1 -- NOT EXISTS: for each row, check that no matching row exists.\ncursor.execute(\"\"\"\n    SELECT o.order_id\n    FROM olist_orders_dataset o\n    WHERE NOT EXISTS (\n        SELECT 1\n        FROM olist_order_reviews_dataset r\n        WHERE r.order_id = o.order_id\n    )\n\"\"\")\n\n# Option 2 -- LEFT JOIN + IS NULL: join the other table, keep the rows that found no partner.\ncursor.execute(\"\"\"\n    SELECT o.order_id\n    FROM olist_orders_dataset o\n    LEFT JOIN olist_order_reviews_dataset r ON r.order_id = o.order_id\n    WHERE r.order_id IS NULL\n\"\"\")\n\n# Both are fastest with an index on the column they look up. Option 1 especially needs it:\n# SQLite builds a temporary index for a JOIN by itself, but not for NOT EXISTS.\n# Create it once if missing:\n# CREATE INDEX IF NOT EXISTS ix_olist_order_reviews_dataset_order_id ON olist_order_reviews_dataset(order_id);\n\nCaveats:\n- The result is the same as before whenever the subquery returns no NULLs. If it does return NULLs, the old query returned no rows at all; the new ones return the rows that really have no match.\n- A row whose own o.order_id is NULL was left out by NOT IN but is kept by both new forms (nothing can match it). Add `AND o.order_id IS NOT NULL` to leave such rows out.\n- LEFT JOIN + IS NULL returns each unmatched row once; it checks the column used for matching, which can only be NULL when no partner was found.\n- To keep NOT IN instead, filter the NULLs out inside the subquery: `... NOT IN (SELECT col FROM t WHERE col IS NOT NULL)`.", "source": "import sqlite3\n\nconn = sqlite3.connect(\"olist.db\")\ncursor = conn.cursor()\n\n# Anti Join with NULL\n# Find orders that do not have a corresponding review\ncursor.execute(\"\"\"\n    SELECT o.order_id\n    FROM olist_orders_dataset o\n    WHERE o.order_id NOT IN (\n        SELECT r.order_id\n        FROM olist_order_reviews_dataset r\n    )\n\"\"\")\n\norders_without_reviews = cursor.fetchall()\n\n# Print orders without reviews\nfor order in orders_without_reviews:\n    print(order[0])\n\nconn.close()", "findings": [{"kind": "NOT_IN_NULL", "where": "line 8", "severity": "high"}], "has_suggestion": true}];
+
+function escapeHtml(s){
+  return (s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+const PY_TOKEN_RE = /("{3}[\s\S]*?"{3}|'{3}[\s\S]*?'{3}|[fr]?"(?:\\.|[^"\\\n])*"|[fr]?'(?:\\.|[^'\\\n])*')|(#[^\n]*)|(\b(?:def|class|return|if|elif|else|for|while|in|import|from|as|with|try|except|finally|raise|pass|break|continue|lambda|yield|global|nonlocal|assert|del|not|and|or|is|None|True|False|self)\b)|(\b\d+(?:\.\d+)?\b)/g;
+const SQL_TOKEN_RE = /('(?:''|[^'])*')|(--[^\n]*)|(\b(?:SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|FULL|CROSS|ON|AND|OR|NOT|IN|EXISTS|AS|GROUP|BY|ORDER|HAVING|LIMIT|OFFSET|DISTINCT|UNION|ALL|IS|NULL|LIKE|BETWEEN|CASE|WHEN|THEN|ELSE|END|ASC|DESC|WITH|INSERT|INTO|VALUES|UPDATE|SET|DELETE)\b)|(\b(?:COUNT|SUM|AVG|MIN|MAX|COALESCE|GROUP_CONCAT|STRING_AGG|ROUND|CAST)\b)|(\b\d+(?:\.\d+)?\b)/gi;
+
+function pushSegment(lines, cursor, text, cls){
+  const parts = text.split('\n');
+  parts.forEach((part, i) => {
+    if (part.length) {
+      const esc = escapeHtml(part);
+      cursor.html += cls ? `<span class="tok-${cls}">${esc}</span>` : esc;
+    }
+    if (i < parts.length - 1) {
+      lines.push(cursor.html);
+      cursor.html = '';
+    }
+  });
+}
+
+function highlightLines(code, lang){
+  const re = lang === 'sql' ? SQL_TOKEN_RE : PY_TOKEN_RE;
+  const classes = lang === 'sql' ? [null, 'str', 'comment', 'kw', 'fn', 'num'] : [null, 'str', 'comment', 'kw', 'num'];
+  const lines = [];
+  const cursor = { html: '' };
+  let lastIndex = 0;
+  let m;
+  re.lastIndex = 0;
+  while ((m = re.exec(code)) !== null) {
+    if (m.index > lastIndex) pushSegment(lines, cursor, code.slice(lastIndex, m.index), null);
+    let cls = null;
+    for (let g = 1; g < classes.length; g++) if (m[g] !== undefined) { cls = classes[g]; break; }
+    pushSegment(lines, cursor, m[0], cls);
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < code.length) pushSegment(lines, cursor, code.slice(lastIndex), null);
+  lines.push(cursor.html);
+  return lines;
+}
+
+function looksLikeSql(code){
+  return /^\s*(SELECT|WITH|INSERT|UPDATE|DELETE)\b/i.test(code || '');
+}
+
+function codeBlockHtml(code, lang){
+  const lines = highlightLines(code, lang);
+  const rows = lines.map((html, i) => `<div class="code-row"><span class="ln">${i+1}</span><span class="lc">${html || ' '}</span></div>`).join('');
+  return `<div class="code-scroll"><div class="code-grid">${rows}</div></div>`;
+}
+
+function sourcePaneHtml(file){
+  const lineCount = file.source ? file.source.replace(/\n$/, '').split('\n').length : 0;
+  const body = file.source
+    ? codeBlockHtml(file.source.replace(/\n$/, ''), 'py')
+    : `<div class="empty-col">Source file not found in tests/bad_code.</div>`;
+  return `
+    <div class="pane">
+      <div class="pane-head">Original code${file.source ? ` <span class="path">${escapeHtml(file.path)} &middot; ${lineCount} lines</span>` : ''}</div>
+      ${body}
+    </div>
+  `;
+}
+
+function expectedPaneHtml(file, idx){
+  return `
+    <div class="pane" data-tone="b">
+      <div class="pane-head"><span class="sw"></span>Expected query<span class="spacer"></span>${file.expected ? `<button class="copy-btn" data-copy="expected" data-idx="${idx}">Copy</button>` : ''}</div>
+      ${file.expected ? codeBlockHtml(file.expected, 'sql') : `<div class="empty-col">No expected query recorded.</div>`}
+    </div>
+  `;
+}
+
+function suggestedPaneHtml(file, idx){
+  const has = file.has_suggestion;
+  const lang = looksLikeSql(file.suggested) ? 'sql' : 'py';
+  const chips = file.findings.length
+    ? `<div class="findings-row">${file.findings.map(f => `<span class="finding-chip">${escapeHtml(f.kind)}<span class="sev">${escapeHtml(f.where)} &middot; ${escapeHtml(f.severity)}</span></span>`).join('')}</div>`
+    : '';
+  return `
+    <div class="pane" data-tone="${has ? 'a' : 'diverge'}">
+      <div class="pane-head"><span class="sw"></span>Current suggested code${has ? ` <span class="path">${lang === 'sql' ? 'SQL' : 'Python'}</span>` : ''}<span class="spacer"></span>${has ? `<button class="copy-btn" data-copy="suggested" data-idx="${idx}">Copy</button>` : ''}</div>
+      ${chips}
+      ${has ? codeBlockHtml(file.suggested, lang) : `<div class="empty-col">No suggested code was produced for this file &mdash; see the raw output below.</div>`}
+    </div>
+  `;
+}
+
+function formatResult(s){
+  const esc = escapeHtml(s || '');
+  return esc
+    .replace(/^(\[using .*\])$/gm, '<span class="hl-section">$1</span>')
+    .replace(/^(=== .* ===)$/gm, '<span class="hl-title">$1</span>')
+    .replace(/^(--- .* ---)$/gm, '<span class="hl-rule">$1</span>')
+    .replace(/^(Suggested code:|Caveats:|Why this helps:)$/gm, '<span class="hl-label">$1</span>')
+    .replace(/^(No issues detected\..*)$/gm, '<span class="hl-no">$1</span>')
+    .replace(/^(- )/gm, '<span class="hl-dash">$1</span>');
+}
+
+function resultHtml(raw){
+  if (!raw) return '';
+  return `
+    <div class="result-toggle-wrap">
+      <button class="result-btn" data-result-toggle data-open="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>
+        <span>View raw output</span>
+      </button>
+      <div class="result-grid" data-result-panel>
+        <div class="result-grid-inner">
+          <div class="terminal">${formatResult(raw)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+let mode = 'all';
+let query = '';
+const openState = new Set();
+
+function buildStats(){
+  const total = DATA.length;
+  const has = DATA.filter(f => f.has_suggestion).length;
+  const findings = DATA.reduce((s, f) => s + f.findings.length, 0);
+  const patterns = new Set(DATA.map(f => f.pattern)).size;
+  const items = [
+    [total, 'bad-code test files', null],
+    [patterns, 'distinct patterns', 'b'],
+    [has, 'files with a suggestion', 'a'],
+    [total - has, 'files with no suggestion', 'diverge'],
+    [findings, 'findings in raw output', null],
+  ];
+  document.getElementById('statsRow').innerHTML = items.map(([num, label, tone]) => `
+    <div class="stat">
+      <div class="num"${tone ? ` data-tone="${tone}"` : ''}>${num}</div>
+      <div class="label">${label}</div>
+    </div>
+  `).join('');
+}
+
+function fileMatches(file){
+  if (mode === 'has' && !file.has_suggestion) return false;
+  if (mode === 'none' && file.has_suggestion) return false;
+  if (!query) return true;
+  return [file.name, file.pattern, file.expected, file.suggested, file.raw, file.source]
+    .join(' ').toLowerCase().includes(query);
+}
+
+function fileHtml(file, idx){
+  const open = openState.has(file.name);
+  return `
+    <div class="file-card" data-open="${open}" data-has="${file.has_suggestion}" data-name="${escapeHtml(file.name)}">
+      <div class="file-head" data-file-toggle>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"/></svg>
+        <div class="file-title">
+          <div class="fname">${escapeHtml(file.name)}</div>
+          <div class="fpath">${escapeHtml(file.path)}</div>
+        </div>
+        <div class="badges">
+          <span class="pattern-pill">${escapeHtml(file.pattern)}</span>
+          <span class="verdict-pill" data-v="${file.has_suggestion ? 'agree' : 'diverge'}">${file.has_suggestion ? 'Suggested' : 'No suggestion'}</span>
+          <span class="tool-count" title="findings in raw output"><span class="sw" style="background:var(--a);"></span>${file.findings.length}</span>
+        </div>
+      </div>
+      <div class="file-body-grid">
+        <div class="file-body-inner">
+          <div class="file-body">
+            <div class="top-split">
+              ${sourcePaneHtml(file)}
+              ${expectedPaneHtml(file, idx)}
+            </div>
+            ${suggestedPaneHtml(file, idx)}
+            ${resultHtml(file.raw)}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function render(){
+  const visible = DATA.map((f, i) => [f, i]).filter(([f]) => fileMatches(f));
+  const listEl = document.getElementById('fileList');
+  listEl.innerHTML = visible.map(([f, i]) => fileHtml(f, i)).join('');
+
+  document.getElementById('resultCount').textContent =
+    (mode !== 'all' || query) ? `Showing ${visible.length} of ${DATA.length} files` : '';
+  document.getElementById('emptyState').style.display = visible.length === 0 ? 'block' : 'none';
+  syncExpandBtn();
+}
+
+function syncExpandBtn(){
+  const cards = [...document.querySelectorAll('.file-card')];
+  const allOpen = cards.length && cards.every(c => c.dataset.open === 'true');
+  document.getElementById('expandAll').textContent = allOpen ? 'Collapse all' : 'Expand all';
+}
+
+document.getElementById('fileList').addEventListener('click', (e) => {
+  const copy = e.target.closest('[data-copy]');
+  if (copy) {
+    e.stopPropagation();
+    const text = DATA[+copy.dataset.idx][copy.dataset.copy];
+    navigator.clipboard?.writeText(text).then(() => {
+      copy.textContent = 'Copied';
+      setTimeout(() => { copy.textContent = 'Copy'; }, 1200);
+    }).catch(() => {});
+    return;
+  }
+  const btn = e.target.closest('[data-result-toggle]');
+  if (btn) {
+    const panel = btn.closest('.result-toggle-wrap').querySelector('[data-result-panel]');
+    const isOpen = btn.dataset.open === 'true';
+    btn.dataset.open = panel.dataset.open = isOpen ? 'false' : 'true';
+    btn.querySelector('span').textContent = (isOpen ? 'View' : 'Hide') + ' raw output';
+    return;
+  }
+  const head = e.target.closest('[data-file-toggle]');
+  if (head) {
+    const card = head.closest('.file-card');
+    const isOpen = card.dataset.open === 'true';
+    card.dataset.open = isOpen ? 'false' : 'true';
+    isOpen ? openState.delete(card.dataset.name) : openState.add(card.dataset.name);
+    syncExpandBtn();
+  }
+});
+
+document.getElementById('expandAll').addEventListener('click', () => {
+  const cards = [...document.querySelectorAll('.file-card')];
+  const allOpen = cards.every(c => c.dataset.open === 'true');
+  cards.forEach(c => {
+    c.dataset.open = allOpen ? 'false' : 'true';
+    allOpen ? openState.delete(c.dataset.name) : openState.add(c.dataset.name);
+  });
+  syncExpandBtn();
+});
+
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  query = e.target.value.trim().toLowerCase();
+  render();
+});
+
+document.getElementById('segmented').querySelectorAll('button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    mode = btn.dataset.mode;
+    document.getElementById('segmented').querySelectorAll('button').forEach(b => {
+      b.dataset.active = (b === btn) ? 'true' : 'false';
+    });
+    render();
+  });
+});
+
+buildStats();
+render();
+</script>
+</body>
+</html>
